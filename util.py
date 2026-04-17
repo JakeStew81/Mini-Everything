@@ -1,5 +1,5 @@
 class NodeType:
-    def __init__(self, name, demands, revenue):
+    def __init__(self, name, demands):
         self.name = name
         self.demands = demands
 
@@ -7,6 +7,12 @@ class Demand:
     def __init__(self, amount, destination):
         self.amount = amount
         self.destination = destination
+
+nodeTypes = {
+    "center": NodeType("City Center", []),
+    "residential": NodeType("Residential", [Demand(1, "City Center")])
+} # TODO: Fill out properly with good values & stuff. Temp value for testing rn.
+    # Demand is in amount/tick, 100 ticks/s
 
 class ConnectionType:
     def __init__(self, name, capacity):
