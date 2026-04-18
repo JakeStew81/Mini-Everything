@@ -2,6 +2,7 @@ class Node:
     def __init__(self, type, position):
         self.type = type
         self.connections = []
+        self.position = position
         self.level = 1
 
     def tick(self):

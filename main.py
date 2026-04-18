@@ -1,4 +1,6 @@
 from Node import Node
+from Connection import Connection
+from util import *
 import util, pygame, GUI
 import numpy as np
 
@@ -7,22 +9,23 @@ MONEY_SCALAR = 0.01
 
 class Game:
     def __init__(self):
-        self.nodes = [Node(util.nodeTypes["center"], (0, 0))]
+        pygame.init()
+        self.nodes = [Node(util.nodeTypes["center"], (0, 0)), Node(util.nodeTypes["residential"], (-100, 0))]
         self.money = 1000
         self.newNodeTimer = 0
-        self.gui = GUI.GUI()
-
-        pygame.init()
+        self.gui = GUI.GUI(pygame.display.set_mode((480, 480), pygame.RESIZABLE))
 
     def loop(self):
-        # If you need to touch this, read up on pygame events first so ya don't break stuff
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
+                return
+
+            if self.gui.handle_event(event, self.nodes, self._add_connection):
+                continue
 
             if event.type == GAME_TICK:
                 self.gameTick()
-        pass
 
     def gameTick(self):
         satisfied_demand = []
@@ -37,7 +40,14 @@ class Game:
 
         self.money += totalDemand * demand_mult * MONEY_SCALAR
 
-        self.gui.update(self.money, self.nodes)
+        self.gui.update(self.nodes)
+        pygame.display.flip()
+
+    def _add_connection(self, node_a, node_b, type_name, level):
+        conn_type = ConnectionType(type_name, None)
+        conn = Connection([node_a, node_b], conn_type, level)
+        node_a.connections.append(conn)
+        node_b.connections.append(conn)
 
 if __name__ == "__main__":
     game = Game()
