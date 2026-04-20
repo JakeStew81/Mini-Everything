@@ -11,7 +11,8 @@ class Demand:
 
 nodeTypes = {
     "center": NodeType("City Center", []),
-    "residential": NodeType("Residential", [Demand(1, "goods", "City Center")])
+    "residential": NodeType("Residential", [Demand(1, "goods", "City Center")]),
+    "commercial": NodeType("Commercial", [Demand(1, "people", "residential")]),
 } # TODO: Fill out properly with good values & stuff. Temp value for testing rn.
     # Demand is in amount/tick, 100 ticks/s
 

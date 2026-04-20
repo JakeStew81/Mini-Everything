@@ -4,7 +4,8 @@ import math
 
 NODE_TYPE_COLORS: dict[str, tuple[int, int, int]] = {
     "City Center": (0, 0, 255),
-    "Residential": (0, 255, 0)
+    "Residential": (0, 255, 0),
+    "Commercial": (255, 0, 0),
 }
 
 # Registry of available connection types for the UI.

@@ -10,7 +10,7 @@ MONEY_SCALAR = 0.01
 class Game:
     def __init__(self):
         pygame.init()
-        self.nodes = [Node(util.nodeTypes["center"], (0, 0)), Node(util.nodeTypes["residential"], (-100, 0))]
+        self.nodes = [Node(util.nodeTypes["center"], (0, 0)), Node(util.nodeTypes["residential"], (-100, 0)), Node(util.nodeTypes["commercial"], (-50, 50))]
         self.money = 1000
         self.newNodeTimer = 0
         self.gui = GUI.GUI(pygame.display.set_mode((480, 480), pygame.RESIZABLE))
