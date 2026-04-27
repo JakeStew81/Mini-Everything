@@ -234,7 +234,7 @@ class GUI:
         for node in nodes:
             sp     = self._to_screen(node.position)
             radius = BASE_NODE_RADIUS + node.level * NODE_RADIUS_PER_LEVEL
-            color  = self._node_color(node.type)
+            color  = self._node_color(node.nodeType)
 
             # Selection ring
             if node is self.selected_node:

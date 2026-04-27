@@ -1,29 +1,39 @@
-
-
-class Demand:
-    def __init__(self, amount: int, type: str, destination: str):
-        self.amount = amount
-        self.type = type
-        self.destination = destination
-
 class NodeType:
-    def __init__(self, name: str, demands: list[Demand]):
+    def __init__(self, name: str, needs: dict[str, tuple[int, int]], maxPeople: int):
+        # For tuples, format is (people, goods)
         self.name = name
-        self.demands = demands
-
-nodeTypes = {
-    "center": NodeType("City Center", []),
-    "residential": NodeType("Residential", [Demand(1, "goods", "City Center")]),
-    "commercial": NodeType("Commercial", [Demand(1, "people", "Residential")]),
-} # TODO: Fill out properly with good values & stuff. Temp value for testing rn.
-    # Demand is in amount/tick, 100 ticks/s
+        self.needs = needs
+        self.maxPeople = maxPeople
 
 class ConnectionType:
-    def __init__(self, name: str, capacity: int):
+    def __init__(self, name: str, capacity: tuple[int, int]):
         self.name = name
         self.capacity = capacity
 
-class Capacity:
-    def __init__(self, people: int, goods: int):
-        self.people = people
-        self.goods = goods
+nodeTypes = {
+    "center": NodeType("City Center",
+                       {"c": (0, 0), "r": (0, 0), "m": (0, 0), "i": (0, 0), "o": (0, 0)},
+                       9999),
+    "residential": NodeType("Residential",
+                            {"c": (1, 0), "r": (0, 0), "m": (2, 0), "i": (2, 0), "o": (1, 0)},
+                            -1),
+    "market": NodeType("Commercial",
+                       {"c": (0, 0), "r": (0, 0), "m": (0, 0), "i": (0, 2), "o": (0, 2)},
+                       10),
+    "industry": NodeType("Industrial",
+                         {"c": (0, 0), "r": (0, 0), "m": (0, 0), "i": (0, 0), "o": (0, 2)},
+                         10),
+    "junction": NodeType("Junction",
+                         {"c": (0, 0), "r": (0, 0), "m": (0, 0), "i": (0, 0), "o": (0, 0)},
+                         9999),
+    "out": NodeType("Outside of City",
+                    {"c": (0, 0), "r": (0, 0), "m": (0, 0), "i": (0, 0), "o": (0, 0)},
+                    9999),
+}  # TODO: Fill out properly with good values & stuff. Temp values for testing rn.
+
+connectionTypes = {
+    "road": ConnectionType("Highway", (2, 2)),
+    "train": ConnectionType("Freight Rail", (0, 4)),
+    "metro": ConnectionType("Subway", (4, 0))
+} # TODO: Fill out properly with good values & stuff. Temp values for testing rn.
+# Needs & capacity is in amount/tick, 100 ticks/s
