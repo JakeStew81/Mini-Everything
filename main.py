@@ -3,6 +3,7 @@ from Connection import Connection
 from util import *
 import util, pygame, GUI
 import numpy as np
+import math
 
 GAME_TICK = pygame.event.custom_type()
 MONEY_SCALAR = 0.01

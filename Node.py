@@ -12,6 +12,7 @@ class Node:
     def tick(self):
         for destination in self.needs:
             amount = self.needs[destination]
+            
             pass
             # TODO: Search alg for amount of needs met (needs to include indirect travel & interchanges)
 
