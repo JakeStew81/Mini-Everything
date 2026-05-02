@@ -11,13 +11,12 @@ class Node:
 
     def tick(self):
         for destination in self.needs:
-            amount = self.needs[destination]
             pass
             # TODO: Search alg for amount of needs met (needs to include indirect travel & interchanges)
 
     def levelUp(self, amount):
         self.level += amount
-        self.needs = {key: (x * self.level for x in val) for key, val in self.nodeType.needs.items()}
+        self.needs = {key: [x * self.level for x in val] for key, val in self.nodeType.needs.items()}
         self.maxPeople = self.maxPeople * self.level
 
     def needsMet(self):
