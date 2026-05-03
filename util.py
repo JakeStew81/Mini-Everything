@@ -1,9 +1,9 @@
 class NodeType:
-    def __init__(self, name: str, needs: dict[str, tuple[int, int]], maxPeople: int):
+    def __init__(self, name: str, needs: dict[str, tuple[int, int]], max_supply: tuple[int, int]):
         # For tuples, format is (people, goods)
         self.name = name
         self.needs = needs
-        self.maxPeople = maxPeople
+        self.max_supply = max_supply
 
 class ConnectionType:
     def __init__(self, name: str, capacity: tuple[int, int]):
@@ -13,23 +13,25 @@ class ConnectionType:
 nodeTypes = {
     "center": NodeType("City Center",
                        {"c": (0, 0), "r": (0, 0), "m": (0, 0), "i": (0, 0), "o": (0, 0)},
-                       9999),
+                       (9999, 9999)),
     "residential": NodeType("Residential",
-                            {"c": (1, 0), "r": (0, 0), "m": (2, 0), "i": (0, 0), "o": (1, 0)},
-                            2),
+                            {"c": (1, 0), "r": (0, 0), "m": (2, 0), "i": (0, 0), "o": (0, 0)}, # changed out people to zero for the sake of testing
+                            (2, 9999)),
     "market": NodeType("Commercial",
                        {"c": (0, 0), "r": (0, 0), "m": (0, 0), "i": (0, 2), "o": (0, 2)},
-                       10),
+                       (10, 9999)),
     "industry": NodeType("Industrial",
                          {"c": (0, 0), "r": (2, 0), "m": (0, 0), "i": (0, 0), "o": (0, 2)},
-                         0),
+                         (2,9999)),
     "junction": NodeType("Junction",
                          {"c": (0, 0), "r": (0, 0), "m": (0, 0), "i": (0, 0), "o": (0, 0)},
-                         9999),
+                         (9999,9999)),
     "out": NodeType("Outside of City",
                     {"c": (0, 0), "r": (0, 0), "m": (0, 0), "i": (0, 0), "o": (0, 0)},
-                    9999),
+                    (9999, 9999)),
 }  # TODO: Fill out properly with good values & stuff. Temp values for testing rn.
+    # I switched out max people for max supply so that we can track both goods and people for that in which it is required
+    # The values are 9999 because idk what they should be, and it seems like you want to do the balance so like -.- you know?
 
 connectionTypes = {
     "road": ConnectionType("Highway", (2, 2)),

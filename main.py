@@ -1,17 +1,23 @@
+# if there is a system for creating a new node you need to increment and pass the UID var idk if there is one I searched and found nothing
+
 from Node import Node
 from Connection import Connection
 from util import *
 import util, pygame, GUI
 import numpy as np
-import math
+import copy
+
 
 GAME_TICK = pygame.event.custom_type()
 MONEY_SCALAR = 0.01
 
+
+
 class Game:
+    UID = 2
     def __init__(self):
         pygame.init()
-        self.nodes = [Node(util.nodeTypes["center"], (0, 0)), Node(util.nodeTypes["residential"], (-100, 0)), Node(util.nodeTypes["market"], (-50, 50))]
+        self.nodes = [Node(util.nodeTypes["center"], (0, 0), 0), Node(util.nodeTypes["residential"], (-100, 0), 1), Node(util.nodeTypes["market"], (-50, 50), 2)]
         self.money = 1000
         self.newNodeTimer = 0
         self.gui = GUI.GUI(pygame.display.set_mode((480, 480), pygame.RESIZABLE))
@@ -30,9 +36,11 @@ class Game:
 
     def gameTick(self):
         satisfied_demand = []
-        for node in self.nodes:
+        mut_nodes = copy.deepcopy(self.nodes)
+        for node in mut_nodes:
             node.tick()
             satisfied_demand.append(node.needsMet())
+
 
         metDemands, totalDemands = zip(*satisfied_demand)
 
@@ -45,8 +53,9 @@ class Game:
         pygame.display.flip()
 
     def _add_connection(self, node_a, node_b, type_name, level):
+        game.UID += 1
         conn_type = ConnectionType(type_name, None)
-        conn = Connection([node_a, node_b], conn_type, level)
+        conn = Connection([node_a, node_b], conn_type, level, game.UID)
         node_a.connections.append(conn)
         node_b.connections.append(conn)
 
