@@ -1,7 +1,8 @@
 class NodeType:
-    def __init__(self, name: str, needs: dict[str, tuple[int, int]], max_supply: tuple[int, int]):
+    def __init__(self, name: str, displayName: str, needs: dict[str, tuple[int, int]], max_supply: tuple[int, int]):
         # For tuples, format is (people, goods)
         self.name = name
+        self.displayName = displayName
         self.needs = needs
         self.max_supply = max_supply
 
@@ -11,22 +12,22 @@ class ConnectionType:
         self.capacity = capacity
 
 nodeTypes = {
-    "center": NodeType("City Center",
+    "center": NodeType("center", "City Center",
                        {"c": (0, 0), "r": (0, 0), "m": (0, 0), "i": (0, 0), "o": (0, 0)},
                        (9999, 9999)),
-    "residential": NodeType("Residential",
+    "residential": NodeType("residential", "Residential",
                             {"c": (1, 0), "r": (0, 0), "m": (2, 0), "i": (0, 0), "o": (0, 0)}, # changed out people to zero for the sake of testing
                             (2, 9999)),
-    "market": NodeType("Commercial",
+    "market": NodeType("market", "Commercial",
                        {"c": (0, 0), "r": (0, 0), "m": (0, 0), "i": (0, 2), "o": (0, 2)},
                        (10, 9999)),
-    "industry": NodeType("Industrial",
+    "industry": NodeType("industrial", "Industrial",
                          {"c": (0, 0), "r": (2, 0), "m": (0, 0), "i": (0, 0), "o": (0, 2)},
                          (2,9999)),
-    "junction": NodeType("Junction",
+    "junction": NodeType("junction", "Junction",
                          {"c": (0, 0), "r": (0, 0), "m": (0, 0), "i": (0, 0), "o": (0, 0)},
                          (9999,9999)),
-    "out": NodeType("Outside of City",
+    "out": NodeType("Outside of City", "OUT",
                     {"c": (0, 0), "r": (0, 0), "m": (0, 0), "i": (0, 0), "o": (0, 0)},
                     (9999, 9999)),
 }  # TODO: Fill out properly with good values & stuff. Temp values for testing rn.

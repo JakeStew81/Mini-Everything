@@ -3,23 +3,26 @@ import math
 
 
 NODE_TYPE_COLORS: dict[str, tuple[int, int, int]] = {
-    "City Center": (0, 0, 255),
-    "Residential": (0, 255, 0),
-    "Commercial": (255, 0, 0),
+    "center": (11, 133, 120),
+    "residential": (8, 196, 24),
+    "market": (12, 96, 166),
+    "industry": (209, 151, 17),
+    "out": (0, 0, 0),
+    "junction": (100, 100, 100)
 }
 
 # Registry of available connection types for the UI.
 # Add new types here; the panel will pick them up automatically.
 CONNECTION_TYPES: list[dict] = [
     {"name": "highway", "color": (0, 0, 0),    "dash": True},
-    {"name": "subway",  "color": (80, 80, 80),  "dash": False},
-    {"name": "rail",    "color": (120, 60, 180), "dash": True},
+    {"name": "subway",  "color": (173, 9, 232),  "dash": False},
+    {"name": "rail",    "color": (122, 82, 13), "dash": True},
 ]
 
 CONNECTION_TYPE_STYLES: dict[str, dict] = {t["name"]: t for t in CONNECTION_TYPES}
 
 BASE_NODE_RADIUS      = 10
-NODE_RADIUS_PER_LEVEL = 5
+NODE_RADIUS_PER_LEVEL = 3
 BASE_CONNECTION_WIDTH      = 2
 CONNECTION_WIDTH_PER_LEVEL = 1
 CONNECTION_OFFSET = 6
