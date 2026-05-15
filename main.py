@@ -1,3 +1,4 @@
+import util
 from Node import Node
 from Connection import Connection
 from util import *
@@ -23,7 +24,9 @@ class Game:
         self.money = 1000
         self.newNodeTimer = 0
         self.levelUpTimer = 0
-        self.gui = GUI.GUI(pygame.display.set_mode((1280, 720), pygame.RESIZABLE))
+        self.surface = pygame.display.set_mode((1280, 720), pygame.RESIZABLE)
+        self.title = GUI.TitleScreen(self.surface)
+        self.gui = None
 
     def loop(self):
         for event in pygame.event.get():
@@ -31,11 +34,24 @@ class Game:
                 pygame.quit()
                 return
 
-            if self.gui.handle_event(event, self.nodes, self._add_connection):
-                continue
+            if not self.title.started:
+                self.title.handle_event(event)
+            else:
+                self.gui.handle_event(event, self.nodes, self._add_connection)
 
             if event.type == GAME_TICK:
-                self.gameTick()
+                if self.title.started:
+                    self.gameTick()
+
+        if self.gui is None and self.title.started:
+            self.gui = GUI.GUI(self.surface)
+
+        if not self.title.started:
+            self.title.update()
+        else:
+            self.gui.update(self.nodes)
+
+        pygame.display.flip()
 
     def gameTick(self):
         satisfied_demand = []
@@ -51,22 +67,18 @@ class Game:
 
         self.money += totalDemand * demand_mult * MONEY_SCALAR
 
-        # self.newNodeTimer += 1
+        self.newNodeTimer += 1
         if self.newNodeTimer > NEW_NODE_COOLDOWN and random.random() <= NEW_NODE_ODDS:
             addNode(self.nodes)
             self.newNodeTimer = 0
 
-        # self.levelUpTimer += 1
+        self.levelUpTimer += 1
         if self.levelUpTimer > LEVEL_UP_COOLDOWN and random.random() <= LEVEL_UP_ODDS:
             levelUpNode(self.nodes)
             self.levelUpTimer = 0
 
-        self.gui.update(self.nodes)
-        pygame.display.flip()
-
     def _add_connection(self, node_a, node_b, type_name, level):
-        conn_type = ConnectionType(type_name, (9999, 9999)) # you ought to program somthing such that it can get an accurate capacity
-        conn = Connection([node_a, node_b], conn_type, level)
+        conn = Connection([node_a, node_b], util.connectionTypes[type_name], level)
         node_a.connections.append(conn)
         node_b.connections.append(conn)
 

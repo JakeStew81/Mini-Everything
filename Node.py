@@ -1,5 +1,3 @@
-from asyncio.windows_events import NULL
-
 from util import NodeType
 
 class Node:
@@ -62,8 +60,6 @@ class Node:
 
             if not people_satisfied or not goods_satisfied:
                 self.satisfied = False
-
-        print(self.position, self.satisfied)
 
             # TODO: Search alg for amount of needs met (needs to include indirect travel & interchanges)
 
