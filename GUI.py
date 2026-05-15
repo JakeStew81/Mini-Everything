@@ -165,7 +165,7 @@ class TitleScreen:
     def _draw_decorative_network(self, cx, cy):
         # Scale the orbit radius with the window so nodes spread out on large
         # screens and stay visible on small ones.
-        orbit_r = _scale(130, self.surface)
+        orbit_r = _scale(300, self.surface)
         screen_nodes = [self._to_screen(p, orbit_r, cx, cy) for p in self._deco_offsets]
 
         for a, b in self._deco_conns:
@@ -190,8 +190,8 @@ class TitleScreen:
             pygame.draw.circle(self.surface, color, sp, node_r + max(2, node_r // 2), 1)
 
     def _draw_title(self, cx, cy):
-        font_title = _font(64, self.surface, bold=True)
-        font_sub   = _font(22, self.surface)
+        font_title = _font(90, self.surface, bold=True)
+        font_sub   = _font(40, self.surface)
 
         title_surf = font_title.render("Mini Transit", True, C_TITLE_TEXT)
         title_rect = title_surf.get_rect(center=(cx, cy - _scale(10, self.surface)))

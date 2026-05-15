@@ -11,10 +11,10 @@ import copy
 GAME_TICK = pygame.event.custom_type()
 MONEY_SCALAR = 0.01
 
-NEW_NODE_COOLDOWN = 5
+NEW_NODE_COOLDOWN = 50000
 NEW_NODE_ODDS = 0.1
 
-LEVEL_UP_COOLDOWN = 2.5
+LEVEL_UP_COOLDOWN = 50000
 LEVEL_UP_ODDS = 0.15
 
 class Game:
@@ -58,9 +58,14 @@ class Game:
         mut_nodes = copy.deepcopy(self.nodes)
         for node in mut_nodes: 
             node.tick()
-            satisfied_demand.append(node.needsMet())
+            satisfied_demand.append(node.ratioNeedsMet())
+
+
+        print(satisfied_demand)
 
         metDemands, totalDemands = zip(*satisfied_demand)
+
+        #print(sum(totalDemands) - sum(metDemands), sum(totalDemands))
 
         demand_mult = (np.sum(metDemands) / np.sum(totalDemands)) ** 3
         totalDemand = np.sum(totalDemands)
@@ -78,6 +83,7 @@ class Game:
             self.levelUpTimer = 0
 
     def _add_connection(self, node_a, node_b, type_name, level):
+        print("Add connection")
         conn = Connection([node_a, node_b], util.connectionTypes[type_name], level)
         node_a.connections.append(conn)
         node_b.connections.append(conn)
