@@ -371,7 +371,7 @@ class GUI:
                 need_lines.append((display_name, "Goods", goods))
 
         # Overall needs-met summary from the single tuple.
-        met, total = node.ratioNeedsMet()
+        met, total = node._needsMet
 
         # One overall progress bar row (bar_h + gap).
         bar_h = max(4, _scale(5, self.surface))
@@ -670,24 +670,21 @@ class GUI:
         bar_h = max(4, _scale(5, self.surface))
         line_h = font_body.get_height()
 
-        # conn.capacity -> (cap_people, cap_goods)
-        # conn.load     -> (current_load, max_load)
         cap_people, cap_goods = conn.capacity
-        current_load, max_load = conn.load
+        load_people, load_goods = conn.load
+
+        load_people = cap_people - load_people
+        load_goods = cap_goods - load_goods
 
         title_text = conn.type.name.capitalize()
 
-        # Layout rows: title + divider + level + 2 capacity lines
-        #              + divider + load label + bar
-        box_h = (font_title.get_height() + pad   # title
-                 + 6                              # divider
-                 + (line_h + 2)                   # "Level: x"
-                 + 2 * (line_h + 2)               # capacity people / goods
-                 + 8                              # gap before load section
-                 + (line_h + 2)                   # "Load: x / y"
-                 + bar_h + 6                      # load bar
+        # 1 title + 1 level line + 2×(label + bar) rows
+        box_h = (font_title.get_height() + pad
+                 + 6
+                 + (line_h + 2)  # "Level: x"
+                 + 2 * (line_h + 2 + bar_h + 6)  # "People:" + bar, "Goods:" + bar
                  + pad)
-        box_w = max(180, _scale(220, self.surface))
+        box_w = max(180, _scale(210, self.surface))
 
         mx, my = pygame.mouse.get_pos()
         tx = mx + 14
@@ -718,30 +715,23 @@ class GUI:
         self.surface.blit(level_surf, (tx + pad, y))
         y += line_h + 2
 
-        # Capacity — people and goods on separate lines
-        for label, cap in [("People", cap_people), ("Goods", cap_goods)]:
-            cap_surf = font_body.render(f"Capacity — {label}: {cap}", True, (60, 60, 60))
-            self.surface.blit(cap_surf, (tx + pad, y))
+        # Resource rows: label then bar
+        bar_total_w = box_w - pad * 2
+        for label, load, cap in [("People", load_people, cap_people),
+                                 ("Goods", load_goods, cap_goods)]:
+            lbl_surf = font_body.render(f"{label}:", True, (60, 60, 60))
+            self.surface.blit(lbl_surf, (tx + pad, y))
             y += line_h + 2
 
-        y += 8  # breathing room before load section
-
-        # Combined load label
-        load_surf = font_body.render(f"Load: {current_load} / {max_load}", True, (60, 60, 60))
-        self.surface.blit(load_surf, (tx + pad, y))
-        y += line_h + 2
-
-        # Load bar
-        bar_total_w = box_w - pad * 2
-        pct = (current_load / max_load) if max_load > 0 else 0
-        bar_rect = pygame.Rect(tx + pad, y, bar_total_w, bar_h)
-        pygame.draw.rect(self.surface, (210, 210, 210), bar_rect, border_radius=2)
-        fill_w = int(bar_total_w * min(pct, 1.0))
-        if fill_w > 0:
-            fill_color = ((200, 80, 60) if pct >= 1.0 else
-                          (209, 151, 17) if pct >= 0.75 else
-                          (11, 133, 120))
-            pygame.draw.rect(self.surface, fill_color,
-                             pygame.Rect(tx + pad, y, fill_w, bar_h),
-                             border_radius=2)
-        y += bar_h + 6
+            pct = (load / cap) if cap > 0 else 0
+            bar_rect = pygame.Rect(tx + pad, y, bar_total_w, bar_h)
+            pygame.draw.rect(self.surface, (210, 210, 210), bar_rect, border_radius=2)
+            fill_w = int(bar_total_w * min(pct, 1.0))
+            if fill_w > 0:
+                fill_color = ((200, 80, 60) if pct >= 1.0 else
+                              (209, 151, 17) if pct >= 0.75 else
+                              (11, 133, 120))
+                pygame.draw.rect(self.surface, fill_color,
+                                 pygame.Rect(tx + pad, y, fill_w, bar_h),
+                                 border_radius=2)
+            y += bar_h + 6

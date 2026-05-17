@@ -27,6 +27,7 @@ class Game:
         self.surface = pygame.display.set_mode((1200, 900), pygame.RESIZABLE | pygame.SCALED)
         self.title = GUI.TitleScreen(self.surface)
         self.gui = None
+        self.sketchystoringmutnodes = self.nodes
 
     def loop(self):
         for event in pygame.event.get():
