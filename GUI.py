@@ -78,9 +78,9 @@ def _scale(reference: float, surface: pygame.Surface, axis: str = "h") -> int:
 
 
 def _font(size_ref: int, surface: pygame.Surface, bold: bool = False) -> pygame.font.Font:
-    """Return a SysFont scaled to the current window height."""
-    size = _scale(size_ref, surface)
-    return pygame.font.SysFont(pygame.font.get_default_font(), size, bold=bold)
+    size = _scale(size_ref - 6, surface)
+    # Use the bundled font directly — crisp at any size
+    return pygame.font.Font(pygame.font.get_default_font(), size)
 
 
 class TitleScreen:
@@ -232,6 +232,15 @@ class TitleScreen:
 
 
 class GUI:
+    # Maps single-letter need keys to human-readable display names.
+    NEED_DISPLAY_NAMES: dict[str, str] = {
+        "c": "City Center",
+        "r": "Residential",
+        "m": "Commercial",
+        "i": "Industrial",
+        "o": "Out of City",
+    }
+
     def __init__(self, surface: pygame.Surface):
         self.surface = surface
 
@@ -240,7 +249,7 @@ class GUI:
         self.active_type_idx = 0
         self.active_level    = 1
         self.hovered_node    = None
-
+        self.hovered_conn = None
         self._type_btn_rects: list[pygame.Rect] = []
 
     # ------------------------------------------------------------------
@@ -308,11 +317,14 @@ class GUI:
             self.active_level = max(1, min(10, self.active_level + event.y))
             return True
 
+
         elif event.type == pygame.MOUSEMOTION:
             if self.canvas_rect().collidepoint(event.pos):
                 self.hovered_node = self._node_at(nodes, event.pos)
+                self.hovered_conn = self._connection_at(nodes, event.pos)
             else:
                 self.hovered_node = None
+                self.hovered_conn = None
 
         return False
 
@@ -328,11 +340,99 @@ class GUI:
         self._draw_nodes(nodes)
 
         self.surface.set_clip(old_clip)
+        self._draw_node_tooltip(nodes)
+        self._draw_connection_tooltip()
         self._draw_panel()
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _draw_node_tooltip(self, nodes: list):
+        node = self.hovered_node
+        if node is None:
+            return
+
+        font_title = _font(25, self.surface, bold=True)
+        font_body = _font(20, self.surface)
+        pad = 10
+        line_h = font_body.get_height()
+
+        title_text = f"{node.nodeType.displayName}  (Lv. {node.level})"
+
+        # Each need value is (people, goods); emit a sub-line for each non-zero component.
+        # need_lines entries: (display_name, sub_label, amount)
+        need_lines = []
+        for need_key, (people, goods) in node.needs.items():
+            display_name = self.NEED_DISPLAY_NAMES.get(need_key, need_key)
+            if people > 0:
+                need_lines.append((display_name, "People", people))
+            if goods > 0:
+                need_lines.append((display_name, "Goods", goods))
+
+        # Overall needs-met summary from the single tuple.
+        met, total = node.needsMet
+
+        # One overall progress bar row (bar_h + gap).
+        bar_h = max(4, _scale(5, self.surface))
+        bar_row_h = bar_h + 8  # bar + breathing room below it
+
+        n_text_lines = len(need_lines) + 1
+        box_h = (font_title.get_height() + pad        # title
+                 + 6                                   # divider gap
+                 + n_text_lines * (line_h + 2)         # text rows
+                 + pad * 2)
+        box_w = max(160, _scale(200, self.surface))
+
+        mx, my = pygame.mouse.get_pos()
+        tx = mx + 14
+        ty = my - box_h // 2
+        canvas_w = self.canvas_rect().width
+        if tx + box_w > canvas_w:
+            tx = mx - box_w - 10
+        ty = max(4, min(ty, self.surface.get_height() - box_h - 4))
+
+        # Background
+        box = pygame.Rect(tx, ty, box_w, box_h)
+        pygame.draw.rect(self.surface, (255, 255, 255), box, border_radius=8)
+        pygame.draw.rect(self.surface, (180, 180, 180), box, width=1, border_radius=8)
+
+        # Title
+        y = ty + pad
+        title_surf = font_title.render(title_text, True, (30, 30, 30))
+        self.surface.blit(title_surf, (tx + pad, y))
+        y += font_title.get_height() + 4
+
+        # Divider
+        pygame.draw.line(self.surface, (200, 200, 200),
+                         (tx + pad, y), (tx + box_w - pad, y), 1)
+        y += 6
+
+        if need_lines:
+            needs_title = font_body.render("Needs:", True, (0, 0, 0))
+            self.surface.blit(needs_title, (tx + pad, y))
+            y += line_h + 2
+
+            # Each entry: (display_name, sub_label, amount)
+            for display_name, sub_label, amount in need_lines:
+                label = font_body.render(f"{display_name} — {sub_label}: {amount}", True, (60, 60, 60))
+                self.surface.blit(label, (tx + pad, y))
+                y += line_h + 2
+
+            # One overall progress bar.
+            pct = int(met / total * 100) if total > 0 else 0
+            bar_total_w = box_w - pad * 2
+            bar_rect = pygame.Rect(tx + pad, y, bar_total_w, bar_h)
+            pygame.draw.rect(self.surface, (210, 210, 210), bar_rect, border_radius=2)
+            fill_w = int(bar_total_w * pct / 100)
+            if fill_w > 0:
+                fill_color = (11, 133, 120) if pct >= 80 else (209, 151, 17) if pct >= 40 else (200, 80, 60)
+                pygame.draw.rect(self.surface, fill_color,
+                                 pygame.Rect(tx + pad, y, fill_w, bar_h), border_radius=2)
+            y += bar_row_h
+        else:
+            no_needs = font_body.render("No Needs", True, (150, 150, 150))
+            self.surface.blit(no_needs, (tx + pad, y))
 
     def _pos_scale(self) -> float:
         """
@@ -535,3 +635,103 @@ class GUI:
         # ── Hint ──
         hint = font_sm.render("esc / right-click: cancel", True, C_HINT)
         self.surface.blit(hint, hint.get_rect(centerx=px + pw // 2, y=y))
+
+    _CONNECTION_HIT_RADIUS = 8  # px from midpoint to trigger hover
+
+    def _connection_at(self, nodes: list, screen_pos):
+        """Return the connection whose screen-space midpoint is closest to
+        screen_pos (within _CONNECTION_HIT_RADIUS), or None."""
+        best_conn = None
+        best_dist = self._CONNECTION_HIT_RADIUS + 1
+        seen = set()
+        for node in nodes:
+            for conn in node.connections:
+                if id(conn) in seen:
+                    continue
+                seen.add(id(conn))
+                p1 = self._to_screen(conn.nodes[0].position)
+                p2 = self._to_screen(conn.nodes[1].position)
+                mid = ((p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2)
+                dist = math.hypot(screen_pos[0] - mid[0], screen_pos[1] - mid[1])
+                if dist < best_dist:
+                    best_dist = dist
+                    best_conn = conn
+        return best_conn
+
+    def _draw_connection_tooltip(self):
+        """Draw a tooltip for self.hovered_conn near the mouse cursor."""
+        conn = self.hovered_conn
+        if conn is None:
+            return
+
+        font_title = _font(25, self.surface, bold=True)
+        font_body = _font(20, self.surface)
+        pad = 10
+        bar_h = max(4, _scale(5, self.surface))
+        line_h = font_body.get_height()
+
+        cap_people, cap_goods = conn.capacity
+        load_people, load_goods = conn.load
+
+        load_people = cap_people - load_people
+        load_goods = cap_goods - load_goods
+
+        title_text = conn.type.name.capitalize()
+
+        # 1 title + 1 level line + 2×(label + bar) rows
+        box_h = (font_title.get_height() + pad
+                 + 6
+                 + (line_h + 2)  # "Level: x"
+                 + 2 * (line_h + 2 + bar_h + 6)  # "People:" + bar, "Goods:" + bar
+                 + pad)
+        box_w = max(180, _scale(210, self.surface))
+
+        mx, my = pygame.mouse.get_pos()
+        tx = mx + 14
+        ty = my - box_h // 2
+        canvas_w = self.canvas_rect().width
+        if tx + box_w > canvas_w:
+            tx = mx - box_w - 10
+        ty = max(4, min(ty, self.surface.get_height() - box_h - 4))
+
+        box = pygame.Rect(tx, ty, box_w, box_h)
+        pygame.draw.rect(self.surface, (255, 255, 255), box, border_radius=8)
+        pygame.draw.rect(self.surface, (180, 180, 180), box, width=1, border_radius=8)
+
+        y = ty + pad
+
+        # Title
+        title_surf = font_title.render(title_text, True, (30, 30, 30))
+        self.surface.blit(title_surf, (tx + pad, y))
+        y += font_title.get_height() + 4
+
+        # Divider
+        pygame.draw.line(self.surface, (200, 200, 200),
+                         (tx + pad, y), (tx + box_w - pad, y), 1)
+        y += 6
+
+        # Level
+        level_surf = font_body.render(f"Level: {conn.level}", True, (60, 60, 60))
+        self.surface.blit(level_surf, (tx + pad, y))
+        y += line_h + 2
+
+        # Resource rows: label then bar
+        bar_total_w = box_w - pad * 2
+        for label, load, cap in [("People", load_people, cap_people),
+                                 ("Goods", load_goods, cap_goods)]:
+            lbl_surf = font_body.render(f"{label}:", True, (60, 60, 60))
+            self.surface.blit(lbl_surf, (tx + pad, y))
+            y += line_h + 2
+
+            pct = (load / cap) if cap > 0 else 0
+            bar_rect = pygame.Rect(tx + pad, y, bar_total_w, bar_h)
+            pygame.draw.rect(self.surface, (210, 210, 210), bar_rect, border_radius=2)
+            fill_w = int(bar_total_w * min(pct, 1.0))
+            if fill_w > 0:
+                fill_color = ((200, 80, 60) if pct >= 1.0 else
+                              (209, 151, 17) if pct >= 0.75 else
+                              (11, 133, 120))
+                pygame.draw.rect(self.surface, fill_color,
+                                 pygame.Rect(tx + pad, y, fill_w, bar_h),
+                                 border_radius=2)
+            y += bar_h + 6

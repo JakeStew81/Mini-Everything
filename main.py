@@ -24,7 +24,7 @@ class Game:
         self.money = 1000
         self.newNodeTimer = 0
         self.levelUpTimer = 0
-        self.surface = pygame.display.set_mode((1280, 720), pygame.RESIZABLE)
+        self.surface = pygame.display.set_mode((1200, 900), pygame.RESIZABLE | pygame.SCALED)
         self.title = GUI.TitleScreen(self.surface)
         self.gui = None
 
