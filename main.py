@@ -26,6 +26,7 @@ class Game:
         self.levelUpTimer = 0
         self.surface = pygame.display.set_mode((1200, 900), pygame.RESIZABLE | pygame.SCALED)
         self.title = GUI.TitleScreen(self.surface)
+        self.mut_modes = self.nodes
         self.gui = None
 
     def loop(self):
@@ -59,6 +60,8 @@ class Game:
         for node in mut_nodes:
             node.tick()
             satisfied_demand.append(node.ratioNeedsMet())
+
+        self.mut_modes = mut_nodes
 
         metDemands, totalDemands = zip(*satisfied_demand)
 
