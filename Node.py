@@ -90,4 +90,4 @@ class Node:
         self.supply = self.supply * self.level
 
     def ratioNeedsMet(self):
-        return (sum(self._needsMet), sum(map(sum, self.needs.values()))) # temp, return tuple with (met needs, total needs)
+        return self._needsMet # temp, return tuple with (met needs, total needs)

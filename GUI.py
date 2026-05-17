@@ -14,9 +14,9 @@ NODE_TYPE_COLORS: dict[str, tuple[int, int, int]] = {
 # Registry of available connection types for the UI.
 # Add new types here; the panel will pick them up automatically.
 CONNECTION_TYPES: list[dict] = [
-    {"name": "highway", "color": (0, 0, 0),    "dash": True},
-    {"name": "subway",  "color": (173, 9, 232),  "dash": False},
-    {"name": "rail",    "color": (122, 82, 13), "dash": True},
+    {"name": "Highway", "color": (0, 0, 0),    "dash": True},
+    {"name": "Subway",  "color": (173, 9, 232),  "dash": False},
+    {"name": "Freight Rail",    "color": (122, 82, 13), "dash": True},
 ]
 
 CONNECTION_TYPE_STYLES: dict[str, dict] = {t["name"]: t for t in CONNECTION_TYPES}

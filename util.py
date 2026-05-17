@@ -35,8 +35,8 @@ nodeTypes = {
     # The values are 9999 because idk what they should be, and it seems like you want to do the balance so like -.- you know?
 
 connectionTypes = {
-    "highway": ConnectionType("Highway", (2, 2)),
-    "subway": ConnectionType("Freight Rail", (0, 4)),
-    "rail": ConnectionType("Subway", (4, 0))
+    "Highway": ConnectionType("Highway", (10, 10)),
+    "Freight Rail": ConnectionType("Freight Rail", (0, 4)),
+    "Subway": ConnectionType("Subway", (4, 0))
 } # TODO: Fill out properly with good values & stuff. Temp values for testing rn.
 # Needs & capacity is in amount/tick, 100 ticks/s

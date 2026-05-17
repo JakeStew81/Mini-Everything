@@ -11,24 +11,22 @@ import copy
 GAME_TICK = pygame.event.custom_type()
 MONEY_SCALAR = 0.01
 
-NEW_NODE_COOLDOWN = 50000
+NEW_NODE_COOLDOWN = 500000
 NEW_NODE_ODDS = 0.1
 
-LEVEL_UP_COOLDOWN = 50000
+LEVEL_UP_COOLDOWN = 500000
 LEVEL_UP_ODDS = 0.15
-
 
 class Game:
     def __init__(self):
         pygame.init()
-        self.nodes = [Node(util.nodeTypes["center"], (0, 0)), Node(util.nodeTypes["residential"], (-100, 0)), Node(util.nodeTypes["market"], (-50, 50))]
+        self.nodes = [Node(util.nodeTypes["center"], (0, 0)), Node(util.nodeTypes["residential"], (-100, 0)), Node(util.nodeTypes["market"], (-50, 50)), Node(util.nodeTypes["industry"], (50, 50))]
         self.money = 1000
         self.newNodeTimer = 0
         self.levelUpTimer = 0
         self.surface = pygame.display.set_mode((1200, 900), pygame.RESIZABLE | pygame.SCALED)
         self.title = GUI.TitleScreen(self.surface)
         self.gui = None
-        self.mut_nodes = None
 
     def loop(self):
         for event in pygame.event.get():
@@ -57,19 +55,14 @@ class Game:
 
     def gameTick(self):
         satisfied_demand = []
-        mut_nodes= copy.deepcopy(self.nodes)
-
+        mut_nodes = copy.deepcopy(self.nodes)
         for node in mut_nodes:
             node.tick()
             satisfied_demand.append(node.ratioNeedsMet())
 
-        self.mut_nodes = mut_nodes # there it's part of the class now you should be able to use it wherever
-
-        print(satisfied_demand)
-
         metDemands, totalDemands = zip(*satisfied_demand)
 
-        #print(sum(totalDemands) - sum(metDemands), sum(totalDemands))
+        print(sum(metDemands), sum(totalDemands))
 
         demand_mult = (np.sum(metDemands) / np.sum(totalDemands)) ** 3
         totalDemand = np.sum(totalDemands)
@@ -85,8 +78,6 @@ class Game:
         if self.levelUpTimer > LEVEL_UP_COOLDOWN and random.random() <= LEVEL_UP_ODDS:
             levelUpNode(self.nodes)
             self.levelUpTimer = 0
-
-
 
     def _add_connection(self, node_a, node_b, type_name, level):
         print("Add connection")
