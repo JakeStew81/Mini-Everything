@@ -16,7 +16,7 @@ class Node:
     def tick(self):
         needs_met = (0,0)
         for destination in self.needs:
-            original_need = list(self.needs[destination]) # for print
+            original_need = list(self.needs[destination])
             amount_prev = list(self.needs[destination])
             temp1 = list(needs_met)
             temp1[1] += amount_prev[0] + amount_prev[1]
@@ -34,37 +34,53 @@ class Node:
                             a, b = path[i], path[i + 1]
                             for connection in a.connections:
                                 if (connection.nodes[0] == a and connection.nodes[1] == b) or (connection.nodes[0] == b and connection.nodes[1] == a):
-                                    path_connections.append(connection)
+                                    if self.needs[destination][0] > 0:
+                                        if connection.load[0] > 0:
+                                            path_connections.append(connection)
+                                    if self.needs[destination][1] > 0:
+                                        if connection.load[0] > 0:
+                                            path_connections.append(connection)
                                     break
-
-                        if all(c.load[0] >= 1 for c in path_connections):
-                            for c in path_connections:
-                                temp = list(c.load)
-                                temp[0] -= 1
-                                c.load = tuple(temp)
-                            amount_now[0] -= 1
-                        if all(c.load[1] >= 1 for c in path_connections):
-                            for c in path_connections:
-                                temp = list(c.load)
-                                temp[1] -= 1
-                                c.load = tuple(temp)
-                            amount_now[1] -= 1
+                        if self.needs[destination][0] > 0:
+                            if all(c.load[0] >= 1 for c in path_connections):
+                                for c in path_connections:
+                                    temp = list(c.load)
+                                    temp[0] -= 1
+                                    c.load = tuple(temp)
+                                amount_now[0] -= 1
+                        if self.needs[destination][1] > 0:
+                            if all(c.load[1] >= 1 for c in path_connections):
+                                for c in path_connections:
+                                    temp = list(c.load)
+                                    temp[1] -= 1
+                                    c.load = tuple(temp)
+                                amount_now[1] -= 1
                         break
 
                     for connection in node.connections:
-                        if connection.load[0] < 1 or connection.load[1] < 1:
-                            continue
-                        if connection not in visited:
-                            neighbor = connection.nodes[1] if connection.nodes[0] == node else connection.nodes[0]
-                            if neighbor not in visited:
-                                queue.append((neighbor, path + [neighbor]))
-                                visited.add(neighbor)
+                        print(f"connection {(connection.level)}")
+                        if self.needs[destination][0] > 0:
+                            print(f"people, {connection.load[0]} for {destination}")
+                            if connection.load[0] < 1:
+                                print(f"connection {(connection.level)} is empty")
+                                continue
+
+                        if self.needs[destination][1] > 0:
+                            print(f"goods, {connection.load[1]} for {destination}")
+                            if connection.load[1] < 1:
+                                continue
+
+                        neighbor = connection.nodes[1] if connection.nodes[0] == node else connection.nodes[0]
+                        state = (neighbor, connection)
+                        if state not in visited:
+                            queue.append((neighbor, path + [neighbor]))
+                            visited.add(state)
 
                 if amount_prev[0] == amount_now[0] and amount_prev[1] == amount_now[1]:
                     break
                 amount_prev = (amount_now[0], amount_now[1])
 
-            temp1[0] += (original_need[0] - amount_prev[0] + original_need[1] - amount_prev[1]) // 2
+            temp1[0] += (original_need[0] - amount_prev[0] + original_need[1] - amount_prev[1])
             needs_met = tuple(temp1)
             self._needsMet = needs_met
 

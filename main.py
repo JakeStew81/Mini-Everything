@@ -17,6 +17,7 @@ NEW_NODE_ODDS = 0.1
 LEVEL_UP_COOLDOWN = 50000
 LEVEL_UP_ODDS = 0.15
 
+
 class Game:
     def __init__(self):
         pygame.init()
@@ -27,6 +28,7 @@ class Game:
         self.surface = pygame.display.set_mode((1200, 900), pygame.RESIZABLE | pygame.SCALED)
         self.title = GUI.TitleScreen(self.surface)
         self.gui = None
+        self.mut_nodes = None
 
     def loop(self):
         for event in pygame.event.get():
@@ -55,11 +57,13 @@ class Game:
 
     def gameTick(self):
         satisfied_demand = []
-        mut_nodes = copy.deepcopy(self.nodes)
+        mut_nodes= copy.deepcopy(self.nodes)
+
         for node in mut_nodes:
             node.tick()
             satisfied_demand.append(node.ratioNeedsMet())
 
+        self.mut_nodes = mut_nodes # there it's part of the class now you should be able to use it wherever
 
         print(satisfied_demand)
 
@@ -81,6 +85,8 @@ class Game:
         if self.levelUpTimer > LEVEL_UP_COOLDOWN and random.random() <= LEVEL_UP_ODDS:
             levelUpNode(self.nodes)
             self.levelUpTimer = 0
+
+
 
     def _add_connection(self, node_a, node_b, type_name, level):
         print("Add connection")
