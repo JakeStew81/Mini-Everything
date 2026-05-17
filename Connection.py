@@ -6,7 +6,7 @@ class Connection:
         self.nodes = nodes # [node_a, node_b]
         self.type = type
         self.level = level
-        self.capacity = self.type.capacity
+        self.capacity = tuple(x * self.level for x in self.type.capacity)
         self.load = type.capacity
 
 

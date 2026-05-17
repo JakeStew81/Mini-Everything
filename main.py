@@ -11,16 +11,16 @@ import copy
 GAME_TICK = pygame.event.custom_type()
 MONEY_SCALAR = 0.01
 
-NEW_NODE_COOLDOWN = 50000
+NEW_NODE_COOLDOWN = 500000
 NEW_NODE_ODDS = 0.1
 
-LEVEL_UP_COOLDOWN = 50000
+LEVEL_UP_COOLDOWN = 500000
 LEVEL_UP_ODDS = 0.15
 
 class Game:
     def __init__(self):
         pygame.init()
-        self.nodes = [Node(util.nodeTypes["center"], (0, 0)), Node(util.nodeTypes["residential"], (-100, 0)), Node(util.nodeTypes["market"], (-50, 50))]
+        self.nodes = [Node(util.nodeTypes["center"], (0, 0)), Node(util.nodeTypes["residential"], (-100, 0)), Node(util.nodeTypes["market"], (-50, 50)), Node(util.nodeTypes["industry"], (50, 50))]
         self.money = 1000
         self.newNodeTimer = 0
         self.levelUpTimer = 0
@@ -60,12 +60,9 @@ class Game:
             node.tick()
             satisfied_demand.append(node.ratioNeedsMet())
 
-
-        print(satisfied_demand)
-
         metDemands, totalDemands = zip(*satisfied_demand)
 
-        #print(sum(totalDemands) - sum(metDemands), sum(totalDemands))
+        print(sum(metDemands), sum(totalDemands))
 
         demand_mult = (np.sum(metDemands) / np.sum(totalDemands)) ** 3
         totalDemand = np.sum(totalDemands)
