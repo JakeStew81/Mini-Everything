@@ -40,7 +40,7 @@ class Game:
     def gameTick(self):
         satisfied_demand = []
         mut_nodes = copy.deepcopy(self.nodes)
-        for node in mut_nodes: 
+        for node in mut_nodes:
             node.tick()
             satisfied_demand.append(node.needsMet())
 

@@ -11,16 +11,18 @@ class Node:
         self.needs = nodeType.needs
         self.supply = nodeType.max_supply
         self.name = nodeType.name[0]
-        self.needsMet = (0,0)
+        self._needsMet = (0,0)
 
     def tick(self):
-        needs_met = self.needsMet
+        needs_met = (0,0)
         for destination in self.needs:
-            amount_prev = self.needs[destination]
+            original_need = list(self.needs[destination]) # for print
+            amount_prev = list(self.needs[destination])
             temp1 = list(needs_met)
             temp1[1] += amount_prev[0] + amount_prev[1]
-            while amount_prev[0] != 0 and amount_prev[1] != 0:
-                amount_now = amount_prev
+
+            while amount_prev[0] > 0 or amount_prev[1] > 0:
+                amount_now = list(amount_prev)
                 queue = [(self, [self])]
                 visited = set()
 
@@ -40,13 +42,13 @@ class Node:
                                 temp = list(c.load)
                                 temp[0] -= 1
                                 c.load = tuple(temp)
-                                amount_now[0] -= 1
+                            amount_now[0] -= 1
                         if all(c.load[1] >= 1 for c in path_connections):
                             for c in path_connections:
                                 temp = list(c.load)
                                 temp[1] -= 1
                                 c.load = tuple(temp)
-                                amount_now[1] -= 1
+                            amount_now[1] -= 1
                         break
 
                     for connection in node.connections:
@@ -62,15 +64,11 @@ class Node:
                     break
                 amount_prev = (amount_now[0], amount_now[1])
 
-            temp1[0] += abs(self.needs[destination][0] - amount_prev[0] + self.needs[destination][1] - amount_prev[1])
+            print(f"original: {original_need}, remaining: {amount_prev}")
+            temp1[0] += (original_need[0] - amount_prev[0] + original_need[1] - amount_prev[1]) // 2
             needs_met = tuple(temp1)
-            self.needsMet = needs_met
-
-
-
-
-
-
+            self._needsMet = needs_met
+            print(f"position, {self.position} needs met, {needs_met}")
             # TODO: Search alg for amount of needs met (needs to include indirect travel & interchanges)
 
     def levelUp(self, amount):
