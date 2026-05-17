@@ -3,7 +3,7 @@ from logging import exception
 from Node import Node
 import random, util, math
 
-BOUNDS = (-500, 500)
+BOUNDS = (-400, 400)
 
 def tryTypesLevel(types: list[util.NodeType], level: int, capacityVNeeds):
     for typeToTry in types:

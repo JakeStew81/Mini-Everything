@@ -16,14 +16,14 @@ nodeTypes = {
                        {"c": (0, 0), "r": (0, 0), "m": (0, 0), "i": (0, 0), "o": (0, 0)},
                        (9999, 9999)),
     "residential": NodeType("residential", "Residential",
-                            {"c": (1, 0), "r": (0, 0), "m": (2, 0), "i": (0, 0), "o": (0, 0)}, # changed out people to zero for the sake of testing
-                            (2, 9999)),
+                            {"c": (1, 0), "r": (0, 0), "m": (2, 0), "i": (0, 0), "o": (1, 0)},
+                            (4, 9999)),
     "market": NodeType("market", "Commercial",
-                       {"c": (0, 0), "r": (0, 0), "m": (0, 0), "i": (0, 2), "o": (0, 2)},
+                       {"c": (0, 0), "r": (0, 0), "m": (0, 0), "i": (0, 1), "o": (0, 1)},
                        (10, 9999)),
     "industry": NodeType("industrial", "Industrial",
                          {"c": (0, 0), "r": (2, 0), "m": (0, 0), "i": (0, 0), "o": (0, 2)},
-                         (2,9999)),
+                         (4,9999)),
     "junction": NodeType("junction", "Junction",
                          {"c": (0, 0), "r": (0, 0), "m": (0, 0), "i": (0, 0), "o": (0, 0)},
                          (9999,9999)),
@@ -35,8 +35,8 @@ nodeTypes = {
     # The values are 9999 because idk what they should be, and it seems like you want to do the balance so like -.- you know?
 
 connectionTypes = {
-    "road": ConnectionType("Highway", (2, 2)),
-    "train": ConnectionType("Freight Rail", (0, 4)),
-    "metro": ConnectionType("Subway", (4, 0))
+    "highway": ConnectionType("Highway", (2, 2)),
+    "subway": ConnectionType("Freight Rail", (0, 4)),
+    "rail": ConnectionType("Subway", (4, 0))
 } # TODO: Fill out properly with good values & stuff. Temp values for testing rn.
 # Needs & capacity is in amount/tick, 100 ticks/s

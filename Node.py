@@ -64,17 +64,14 @@ class Node:
                     break
                 amount_prev = (amount_now[0], amount_now[1])
 
-            print(f"original: {original_need}, remaining: {amount_prev}")
             temp1[0] += (original_need[0] - amount_prev[0] + original_need[1] - amount_prev[1]) // 2
             needs_met = tuple(temp1)
             self._needsMet = needs_met
-            print(f"position, {self.position} needs met, {needs_met}")
-            # TODO: Search alg for amount of needs met (needs to include indirect travel & interchanges)
 
     def levelUp(self, amount):
         self.level += amount
         self.needs = {key: [x * self.level for x in val] for key, val in self.nodeType.needs.items()}
         self.supply = self.supply * self.level
 
-    def needsMet(self):
-        return (1, 1) # temp, return tuple with (met needs, total needs)
+    def ratioNeedsMet(self):
+        return (sum(self.needsMet), sum(map(sum, self.needs.values()))) # temp, return tuple with (met needs, total needs)
