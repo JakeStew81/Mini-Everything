@@ -378,10 +378,10 @@ class GUI:
         bar_row_h = bar_h + 8  # bar + breathing room below it
 
         n_text_lines = len(need_lines) + 1
-        box_h = (font_title.get_height() + pad        # title
-                 + 6                                   # divider gap
-                 + n_text_lines * (line_h + 2)         # text rows
-                 + pad * 2)
+        box_h = (font_title.get_height() + pad  # title
+                 + n_text_lines * (line_h + 2)  # text rows
+                 + (line_h + 2)  # "Need Fulfilled" header
+                 + pad * 2 - (0 if need_lines else 18))
         box_w = max(160, _scale(200, self.surface))
 
         mx, my = pygame.mouse.get_pos()
@@ -421,6 +421,9 @@ class GUI:
 
             # One overall progress bar.
             pct = int(met / total * 100) if total > 0 else 0
+            fulfilled_label = font_body.render(f"Need Fulfilled: {pct}%", True, (60, 60, 60))
+            self.surface.blit(fulfilled_label, (tx + pad, y))
+            y += line_h + 2
             bar_total_w = box_w - pad * 2
             bar_rect = pygame.Rect(tx + pad, y, bar_total_w, bar_h)
             pygame.draw.rect(self.surface, (210, 210, 210), bar_rect, border_radius=2)
