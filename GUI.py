@@ -371,7 +371,7 @@ class GUI:
                 need_lines.append((display_name, "Goods", goods))
 
         # Overall needs-met summary from the single tuple.
-        met, total = node.needsMet
+        met, total = node._needsMet
 
         # One overall progress bar row (bar_h + gap).
         bar_h = max(4, _scale(5, self.surface))
