@@ -86,4 +86,5 @@ class Node:
         self.supply = self.supply * self.level
 
     def ratioNeedsMet(self):
+        print(self._needsMet)
         return self._needsMet # temp, return tuple with (met needs, total needs)
