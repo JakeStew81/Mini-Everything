@@ -28,7 +28,7 @@ JUNCTION_COSTS = { # $million per level
 }
 
 CONNECTION_UPKEEP_COSTS = { # $million per mile per month per level
-    "Passenger Rail": (0.0125 * 365) / 12,
+    "Passenger Rail": (0.000003 * 10 * 24 * 365) / 12,
     "Freight Rail": 0.05 / 12,
     "Highway": 0.035 / 12
 }
@@ -120,7 +120,7 @@ class Game:
 
         demand_mult = ((sum(metDemands) / sum(totalDemands)) - 0.45)
         print(demand_mult)
-        totalDemand = np.sum(totalDemands) + 25
+        totalDemand = np.sum(totalDemands) + 40
         totalDemand = totalDemand ** (2/3)
 
         connections = []
@@ -142,7 +142,7 @@ class Game:
                 continue
 
             if random.random() <= NODE_ADVANCEMENT_ODDS and self.node_advancement_timer <= 0:
-                self.node_advancement_cooldown -= NODE_ADVANCEMENT_COOLDOWN_STEP if self.node_advancement_cooldown > 0 else 0
+                self.node_advancement_cooldown -= NODE_ADVANCEMENT_COOLDOWN_STEP if self.node_advancement_cooldown > 50 else 50
                 self.node_advancement_timer = self.node_advancement_cooldown
                 if random.random() <= NEW_NODE_ODDS:
                     addNode(self.nodes)
@@ -200,12 +200,10 @@ class Game:
             hovered_conn.nodes[0].connections.remove(hovered_conn)
             hovered_conn.nodes[1].connections.remove(hovered_conn)
 
-            firstLeg = copy.deepcopy(hovered_conn)
-            secondLeg = copy.deepcopy(hovered_conn)
+            firstLeg = Connection([hovered_conn.nodes[0], junction], hovered_conn.type, hovered_conn.level)
+            secondLeg = Connection([junction, hovered_conn.nodes[1]], hovered_conn.type, hovered_conn.level)
 
-            firstLeg.nodes[1] = junction
             hovered_conn.nodes[0].connections.append(firstLeg)
-            secondLeg.nodes[0] = junction
             hovered_conn.nodes[1].connections.append(secondLeg)
             junction.connections.append(firstLeg)
             junction.connections.append(secondLeg)

@@ -545,7 +545,7 @@ class GUI:
         self.surface.blit(label, (8, self.surface.get_height() - label.get_height() - 6))
 
     def _draw_node_tooltip(self, nodes: list):
-        if self.hovered_node is None:
+        if self.hovered_node is None or self.hovered_node >= len(nodes):
             return
         node = nodes[self.hovered_node]
 
@@ -1313,8 +1313,8 @@ class GUI:
         "Freight Rail": 15,
         "Highway": 10,
     }
-    CONNECTION_UPKEEP_COSTS = {
-        "Passenger Rail": (0.0125 * 365) / 12,
+    CONNECTION_UPKEEP_COSTS = {  # $million per mile per month per level
+        "Passenger Rail": (0.000003 * 10 * 24 * 365) / 12,
         "Freight Rail": 0.05 / 12,
         "Highway": 0.035 / 12
     }
