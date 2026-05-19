@@ -21,6 +21,7 @@ class Game:
     def __init__(self):
         pygame.init()
         self.nodes = [Node(util.nodeTypes["center"], (0, 0)), Node(util.nodeTypes["residential"], (-100, 0)), Node(util.nodeTypes["market"], (-50, 50)), Node(util.nodeTypes["industry"], (50, 50))]
+        self.un_mod_nod = copy.deepcopy(self.nodes)
         self.money = 1000
         self.newNodeTimer = 0
         self.levelUpTimer = 0
@@ -38,7 +39,7 @@ class Game:
             if not self.title.started:
                 self.title.handle_event(event)
             else:
-                self.gui.handle_event(event, self.nodes, self._add_connection)
+                self.gui.handle_event(event, self.un_mod_nod, self._add_connection)
 
             if event.type == GAME_TICK:
                 if self.title.started:
@@ -56,12 +57,10 @@ class Game:
 
     def gameTick(self):
         satisfied_demand = []
-        mut_nodes = copy.deepcopy(self.nodes)
-        for node in mut_nodes:
+        self.nodes = copy.deepcopy(self.un_mod_nod)
+        for node in self.nodes:
             node.tick()
             satisfied_demand.append(node.ratioNeedsMet())
-
-        self.mut_modes = mut_nodes
 
         metDemands, totalDemands = zip(*satisfied_demand)
 
@@ -75,11 +74,12 @@ class Game:
         self.newNodeTimer += 1
         if self.newNodeTimer > NEW_NODE_COOLDOWN and random.random() <= NEW_NODE_ODDS:
             addNode(self.nodes)
+            self.un_mod_nod.append(copy.deepcopy(self.nodes[-1]))
             self.newNodeTimer = 0
 
         self.levelUpTimer += 1
         if self.levelUpTimer > LEVEL_UP_COOLDOWN and random.random() <= LEVEL_UP_ODDS:
-            levelUpNode(self.nodes)
+            levelUpNode(self.un_mod_nod)
             self.levelUpTimer = 0
 
     def _add_connection(self, node_a, node_b, type_name, level):

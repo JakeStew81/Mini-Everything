@@ -329,6 +329,7 @@ class GUI:
         return False
 
     def update(self, nodes: list):
+        print(nodes[1].ratioNeedsMet())
         self.surface.fill(C_TITLE_BG)
         canvas = self.canvas_rect()
 
