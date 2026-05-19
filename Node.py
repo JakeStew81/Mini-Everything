@@ -58,15 +58,11 @@ class Node:
                         break
 
                     for connection in node.connections:
-                        print(f"connection {(connection.level)}")
                         if self.needs[destination][0] > 0:
-                            print(f"people, {connection.load[0]} for {destination}")
                             if connection.load[0] < 1:
-                                print(f"connection {(connection.level)} is empty")
                                 continue
 
                         if self.needs[destination][1] > 0:
-                            print(f"goods, {connection.load[1]} for {destination}")
                             if connection.load[1] < 1:
                                 continue
 

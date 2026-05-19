@@ -14,9 +14,9 @@ NODE_TYPE_COLORS: dict[str, tuple[int, int, int]] = {
 # Registry of available connection types for the UI.
 # Add new types here; the panel will pick them up automatically.
 CONNECTION_TYPES: list[dict] = [
-    {"name": "Highway", "color": (0, 0, 0),    "dash": True},
-    {"name": "Subway",  "color": (173, 9, 232),  "dash": False},
-    {"name": "Freight Rail",    "color": (122, 82, 13), "dash": True},
+    {"name": "Highway", "color": (80, 80, 80),    "dash": False},
+    {"name": "Passenger Rail",  "color": (173, 9, 232),  "dash": False},
+    {"name": "Freight Rail",    "color": (122, 82, 13), "dash": False},
 ]
 
 CONNECTION_TYPE_STYLES: dict[str, dict] = {t["name"]: t for t in CONNECTION_TYPES}
@@ -26,6 +26,11 @@ NODE_RADIUS_PER_LEVEL = 3
 BASE_CONNECTION_WIDTH      = 2
 CONNECTION_WIDTH_PER_LEVEL = 1
 CONNECTION_OFFSET = 6
+
+# Zoom settings
+ZOOM_MIN = 0.3
+ZOOM_MAX = 4.0
+ZOOM_STEP = 0.1
 
 # Panel sizing — expressed as fractions of window width so they scale.
 PANEL_WIDTH_FRACTION  = 0.16   # panel takes ~16 % of window width
@@ -49,6 +54,12 @@ C_SELECT_RING= (255, 215, 0)
 C_PREVIEW    = (150, 150, 150)
 C_HINT       = (120, 120, 120)
 
+# Playback control colors
+C_PAUSE_BTN        = (200, 80, 60)   # red-ish when playing (click to pause)
+C_PAUSE_BTN_PAUSED = (11, 133, 120)  # teal when paused (click to play)
+C_SPEED_BTN        = (70, 130, 220)
+C_SPEED_BTN_MAX    = (209, 151, 17)  # amber at top speed
+
 # Title screen colors
 C_TITLE_BG        = (15, 20, 30)
 C_TITLE_ACCENT     = (11, 133, 120)
@@ -59,17 +70,14 @@ C_START_BTN        = (11, 133, 120)
 C_START_BTN_HOVER  = (14, 170, 153)
 C_START_BTN_TEXT   = (255, 255, 255)
 
+SPEED_STEPS = [1, 2, 3, 4]
+
 
 # ---------------------------------------------------------------------------
 # Responsive helpers
 # ---------------------------------------------------------------------------
 
 def _scale(reference: float, surface: pygame.Surface, axis: str = "h") -> int:
-    """
-    Return an integer pixel value scaled relative to a 900-px tall (or 1200-px
-    wide) reference resolution, so layout proportions stay consistent at any
-    window size.
-    """
     if axis == "h":
         factor = surface.get_height() / 900
     else:
@@ -79,28 +87,16 @@ def _scale(reference: float, surface: pygame.Surface, axis: str = "h") -> int:
 
 def _font(size_ref: int, surface: pygame.Surface, bold: bool = False) -> pygame.font.Font:
     size = _scale(size_ref - 6, surface)
-    # Use the bundled font directly — crisp at any size
     return pygame.font.Font(pygame.font.get_default_font(), size)
 
 
 class TitleScreen:
-    """
-    Standalone title screen drawn on the given surface.
-    Call update() each frame; it returns True once the player
-    has clicked Start (the `started` flag is also set to True).
-
-    All layout values are derived from the surface dimensions on every
-    frame, so the screen responds correctly when the window is resized.
-    """
-
     def __init__(self, surface: pygame.Surface):
         self.surface = surface
         self.started = False
         self._btn_rect: pygame.Rect | None = None
         self._tick = 0
 
-        # Decorative node positions expressed as fractions of the reference
-        # radius (150 px at 900 px tall).  Scaled each frame.
         self._deco_offsets = [
             (0, 0), (0, -1.0), (0, 1.0),
             (-1.0,  0), (1.0,  0), (0.707,  0.707),
@@ -114,10 +110,6 @@ class TitleScreen:
             (1, 8), (2, 6), (2, 5), (2, 8),
             (7, 4)
         ]
-
-    # ------------------------------------------------------------------
-    # Public
-    # ------------------------------------------------------------------
 
     def handle_event(self, event) -> bool:
         if self.started:
@@ -144,7 +136,6 @@ class TitleScreen:
 
         self.surface.fill(C_TITLE_BG)
 
-        # Position the network above centre and the text below it.
         net_cy  = cy - _scale(80, self.surface)
         text_cy = cy + _scale(40, self.surface)
 
@@ -155,16 +146,10 @@ class TitleScreen:
 
         return False
 
-    # ------------------------------------------------------------------
-    # Internal
-    # ------------------------------------------------------------------
-
     def _to_screen(self, offset, radius, cx, cy):
         return (int(offset[0] * radius + cx), int(offset[1] * radius + cy))
 
     def _draw_decorative_network(self, cx, cy):
-        # Scale the orbit radius with the window so nodes spread out on large
-        # screens and stay visible on small ones.
         orbit_r = _scale(300, self.surface)
         screen_nodes = [self._to_screen(p, orbit_r, cx, cy) for p in self._deco_offsets]
 
@@ -232,7 +217,6 @@ class TitleScreen:
 
 
 class GUI:
-    # Maps single-letter need keys to human-readable display names.
     NEED_DISPLAY_NAMES: dict[str, str] = {
         "c": "City Center",
         "r": "Residential",
@@ -249,8 +233,25 @@ class GUI:
         self.active_type_idx = 0
         self.active_level    = 1
         self.hovered_node    = None
-        self.hovered_conn = None
+        self.hovered_conn    = None
         self._type_btn_rects: list[pygame.Rect] = []
+        self.game_speed = 1
+        self.paused = True
+        self.speed_changed = False  # set to True when speed cycles; game loop should reset its skip counter and clear this
+
+        # Zoom and pan state
+        self.zoom = 1.0
+        self._pan_offset = [0.0, 0.0]  # world-space pan in unscaled units
+
+        # Playback button rects (populated each frame by _draw_panel)
+        self._pause_btn_rect: pygame.Rect | None = None
+        self._speed_btn_rect: pygame.Rect | None = None
+
+        # Level button rects (populated each frame by _draw_panel)
+        self._level_minus_rect: pygame.Rect | None = None
+        self._level_plus_rect:  pygame.Rect | None = None
+
+        self._hovered_type_idx: int | None = None
 
     # ------------------------------------------------------------------
     # Responsive layout helpers
@@ -282,31 +283,57 @@ class GUI:
         return pygame.Rect(0, 0, w - self._panel_width(), h)
 
     def handle_event(self, event, nodes, on_connect):
-        if event.type == pygame.MOUSEBUTTONDOWN:
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             pos = event.pos
 
+            # ── Playback controls ──────────────────────────────────────
+            if self._pause_btn_rect and self._pause_btn_rect.collidepoint(pos):
+                self.paused = not self.paused
+                return True
+
+            if self._speed_btn_rect and self._speed_btn_rect.collidepoint(pos):
+                current_idx = SPEED_STEPS.index(self.game_speed) if self.game_speed in SPEED_STEPS else 0
+                self.game_speed = SPEED_STEPS[(current_idx + 1) % len(SPEED_STEPS)]
+                self.speed_changed = True
+                return True
+
+            # ── Level buttons ──────────────────────────────────────────
+            if self._level_minus_rect and self._level_minus_rect.collidepoint(pos):
+                self.active_level = max(1, self.active_level - 1)
+                return True
+
+            if self._level_plus_rect and self._level_plus_rect.collidepoint(pos):
+                self.active_level = min(10, self.active_level + 1)
+                return True
+
+            # ── Connection type buttons ────────────────────────────────
             for i, rect in enumerate(self._type_btn_rects):
                 if rect.collidepoint(pos):
                     self.active_type_idx = i
                     return True
 
+            # Any remaining click inside the panel is consumed here so it
+            # never bleeds through to canvas / node logic below.
+            if not self.canvas_rect().collidepoint(pos):
+                return True
+
             if self.canvas_rect().collidepoint(pos):
-                if event.button == 1:
-                    clicked = self._node_at(nodes, pos)
-                    if clicked is None:
-                        self.selected_node = None
-                    elif self.selected_node is None:
-                        self.selected_node = clicked
-                    elif clicked is self.selected_node:
-                        self.selected_node = None
-                    else:
-                        type_name = CONNECTION_TYPES[self.active_type_idx]["name"]
-                        on_connect(self.selected_node, clicked, type_name, self.active_level)
-                        self.selected_node = None
-                    return True
-                elif event.button == 3:
+                clicked = self._node_at(nodes, pos)  # now returns an index
+                if clicked is None:
                     self.selected_node = None
-                    return True
+                elif self.selected_node is None:
+                    self.selected_node = clicked
+                elif clicked == self.selected_node:  # was `is`, now `==`
+                    self.selected_node = None
+                else:
+                    type_name = CONNECTION_TYPES[self.active_type_idx]["name"]
+                    on_connect(nodes[self.selected_node], nodes[clicked], type_name, self.active_level)
+                    self.selected_node = None
+
+        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 3:
+            if self.canvas_rect().collidepoint(event.pos):
+                self.selected_node = None
+                return True
 
         elif event.type == pygame.KEYDOWN:
             if event.key == pygame.K_ESCAPE:
@@ -314,21 +341,57 @@ class GUI:
                 return True
 
         elif event.type == pygame.MOUSEWHEEL:
-            self.active_level = max(1, min(10, self.active_level + event.y))
-            return True
+            # Only zoom when the cursor is over the canvas
+            mouse_pos = pygame.mouse.get_pos()
+            if self.canvas_rect().collidepoint(mouse_pos):
+                old_zoom = self.zoom
+                new_zoom = max(ZOOM_MIN, min(ZOOM_MAX, self.zoom + event.y * ZOOM_STEP))
+
+                # Zoom toward the cursor position so it stays fixed on screen.
+                # Convert cursor to canvas-center-relative coords before/after.
+                canvas = self.canvas_rect()
+                cx = canvas.width  / 2
+                cy = self.surface.get_height() / 2
+
+                # Screen offset of cursor from canvas center
+                dx = mouse_pos[0] - cx
+                dy = mouse_pos[1] - cy
+
+                # Adjust pan so the world point under the cursor stays put.
+                # The world coordinate under the cursor before zoom:
+                #   world_x = dx / (ps * old_zoom) - pan_offset[0]
+                # We want that same world_x to map to the same screen dx after zoom:
+                #   dx / (ps * new_zoom) - pan_offset[0]' = world_x
+                # Solving: pan_offset[0]' = dx/ps * (1/new_zoom - 1/old_zoom) + pan_offset[0]
+                # So the delta to add is dx/ps * (1/new_zoom - 1/old_zoom)
+                self.zoom = new_zoom
+                ps = self._pos_scale_base()
+                self._pan_offset[0] += dx / ps * (1.0 / new_zoom - 1.0 / old_zoom)
+                self._pan_offset[1] += dy / ps * (1.0 / new_zoom - 1.0 / old_zoom)
+                return True
+
 
 
         elif event.type == pygame.MOUSEMOTION:
             if self.canvas_rect().collidepoint(event.pos):
                 self.hovered_node = self._node_at(nodes, event.pos)
-                self.hovered_conn = self._connection_at(nodes, event.pos)
+                if self.hovered_node is None:
+                    self.hovered_conn = self._connection_at(nodes, event.pos)
+                else:
+                    self.hovered_conn = None
+                self._hovered_type_idx = None  # cursor is on canvas, not panel
             else:
                 self.hovered_node = None
                 self.hovered_conn = None
-
+                # Check if hovering a connection type button
+                self._hovered_type_idx = None
+                for i, rect in enumerate(self._type_btn_rects):
+                    if rect.collidepoint(event.pos):
+                        self._hovered_type_idx = i
+                        break
         return False
 
-    def update(self, nodes: list):
+    def update(self, nodes: list, money: float, moneyPerDay: float):
         self.surface.fill(C_TITLE_BG)
         canvas = self.canvas_rect()
 
@@ -341,17 +404,27 @@ class GUI:
 
         self.surface.set_clip(old_clip)
         self._draw_node_tooltip(nodes)
-        self._draw_connection_tooltip()
-        self._draw_panel()
+        self._draw_connection_tooltip(nodes)
+        self._draw_panel(money, moneyPerDay)
+        self._draw_zoom_indicator()
+        self._draw_connection_preview_tooltip(nodes)
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
+    def _draw_zoom_indicator(self):
+        """Small zoom level label in the bottom-left of the canvas."""
+        font = _font(16, self.surface)
+        label = font.render(f"zoom: {self.zoom:.1f}x  (scroll to zoom)", True, C_HINT)
+        self.surface.blit(label, (8, self.surface.get_height() - label.get_height() - 6))
+
     def _draw_node_tooltip(self, nodes: list):
-        node = self.hovered_node
-        if node is None:
+        if self.hovered_node is None:
             return
+        node = nodes[self.hovered_node]
+        print(f"Reg {nodes[1].ratioNeedsMet()}") # works fine
+        print(node.ratioNeedsMet()) # when hovering over the same node that maps to 1, returns (0, 0)
 
         font_title = _font(25, self.surface, bold=True)
         font_body = _font(20, self.surface)
@@ -360,8 +433,6 @@ class GUI:
 
         title_text = f"{node.nodeType.displayName}  (Lv. {node.level})"
 
-        # Each need value is (people, goods); emit a sub-line for each non-zero component.
-        # need_lines entries: (display_name, sub_label, amount)
         need_lines = []
         for need_key, (people, goods) in node.needs.items():
             display_name = self.NEED_DISPLAY_NAMES.get(need_key, need_key)
@@ -370,17 +441,15 @@ class GUI:
             if goods > 0:
                 need_lines.append((display_name, "Goods", goods))
 
-        # Overall needs-met summary from the single tuple.
-        met, total = node._needsMet
+        met, total = node.ratioNeedsMet()
 
-        # One overall progress bar row (bar_h + gap).
         bar_h = max(4, _scale(5, self.surface))
-        bar_row_h = bar_h + 8  # bar + breathing room below it
+        bar_row_h = bar_h + 8
 
         n_text_lines = len(need_lines) + 1
-        box_h = (font_title.get_height() + pad  # title
-                 + n_text_lines * (line_h + 2)  # text rows
-                 + (line_h + 2)  # "Need Fulfilled" header
+        box_h = (font_title.get_height() + pad
+                 + n_text_lines * (line_h + 2)
+                 + (line_h + 2)
                  + pad * 2 - (0 if need_lines else 18))
         box_w = max(160, _scale(200, self.surface))
 
@@ -392,18 +461,15 @@ class GUI:
             tx = mx - box_w - 10
         ty = max(4, min(ty, self.surface.get_height() - box_h - 4))
 
-        # Background
         box = pygame.Rect(tx, ty, box_w, box_h)
         pygame.draw.rect(self.surface, (255, 255, 255), box, border_radius=8)
         pygame.draw.rect(self.surface, (180, 180, 180), box, width=1, border_radius=8)
 
-        # Title
         y = ty + pad
         title_surf = font_title.render(title_text, True, (30, 30, 30))
         self.surface.blit(title_surf, (tx + pad, y))
         y += font_title.get_height() + 4
 
-        # Divider
         pygame.draw.line(self.surface, (200, 200, 200),
                          (tx + pad, y), (tx + box_w - pad, y), 1)
         y += 6
@@ -413,13 +479,11 @@ class GUI:
             self.surface.blit(needs_title, (tx + pad, y))
             y += line_h + 2
 
-            # Each entry: (display_name, sub_label, amount)
             for display_name, sub_label, amount in need_lines:
                 label = font_body.render(f"{display_name} — {sub_label}: {amount}", True, (60, 60, 60))
                 self.surface.blit(label, (tx + pad, y))
                 y += line_h + 2
 
-            # One overall progress bar.
             pct = int(met / total * 100) if total > 0 else 0
             fulfilled_label = font_body.render(f"Need Fulfilled: {pct}%", True, (60, 60, 60))
             self.surface.blit(fulfilled_label, (tx + pad, y))
@@ -437,33 +501,34 @@ class GUI:
             no_needs = font_body.render("No Needs", True, (150, 150, 150))
             self.surface.blit(no_needs, (tx + pad, y))
 
-    def _pos_scale(self) -> float:
-        """
-        Uniform scale factor that maps world-space node positions (designed for
-        a 1200x900 canvas) to the current canvas size. Using the smaller axis
-        keeps nodes on-screen when the window is narrow or short.
-        """
+    def _pos_scale_base(self) -> float:
+        """Base scale factor without zoom applied."""
         canvas = self.canvas_rect()
         return min(canvas.width / 1200, self.surface.get_height() / 900)
+
+    def _pos_scale(self) -> float:
+        return self._pos_scale_base() * self.zoom
 
     def _to_screen(self, pos):
         cx = self.canvas_rect().width  / 2
         cy = self.surface.get_height() / 2
         s  = self._pos_scale()
-        return (int(pos[0] * s + cx), int(pos[1] * s + cy))
+        return (
+            int((pos[0] + self._pan_offset[0]) * s + cx),
+            int((pos[1] + self._pan_offset[1]) * s + cy),
+        )
 
     def _node_radius(self, node) -> int:
-        """Return the scaled pixel radius for a node."""
         base = _scale(BASE_NODE_RADIUS, self.surface)
         per_level = _scale(NODE_RADIUS_PER_LEVEL, self.surface)
-        return base + node.level * per_level
+        return max(2, int((base + node.level * per_level) * self.zoom))
 
     def _node_at(self, nodes, screen_pos):
-        for node in nodes:
+        for i, node in enumerate(nodes):
             sp = self._to_screen(node.position)
             radius = self._node_radius(node)
             if math.hypot(screen_pos[0] - sp[0], screen_pos[1] - sp[1]) <= radius + 4:
-                return node
+                return i
         return None
 
     def _node_color(self, node_type):
@@ -515,43 +580,44 @@ class GUI:
                 connections = pair_map[key]
                 n = len(connections)
                 for i, c in enumerate(connections):
-                    offset = (i - (n - 1) / 2) * CONNECTION_OFFSET
+                    offset = (i - (n - 1) / 2) * CONNECTION_OFFSET * self.zoom
                     p1 = self._to_screen(c.nodes[0].position)
                     p2 = self._to_screen(c.nodes[1].position)
                     op1, op2 = self._offset_line(p1, p2, offset)
                     style = self._connection_style(c.type)
                     color = style.get("color", (100, 100, 100))
-                    width = max(1, BASE_CONNECTION_WIDTH + c.level * CONNECTION_WIDTH_PER_LEVEL)
+                    width = max(1, int((BASE_CONNECTION_WIDTH + c.level * CONNECTION_WIDTH_PER_LEVEL) * self.zoom))
+                    dash_len = max(4, int(10 * self.zoom))
                     if style.get("dash"):
                         self._draw_dashed_line(color, op1, op2, width,
-                                               style.get("dash") if isinstance(style.get("dash"), int) else 10)
+                                               style.get("dash") if isinstance(style.get("dash"), int) else dash_len)
                     else:
                         pygame.draw.line(self.surface, color, op1, op2, width)
 
     def _draw_preview(self, nodes):
         if self.selected_node is None:
             return
-        p1 = self._to_screen(self.selected_node.position)
+        p1 = self._to_screen(nodes[self.selected_node].position)
         mx, my = pygame.mouse.get_pos()
-        p2 = (mx, my) if self.hovered_node is None else self._to_screen(self.hovered_node.position)
+        p2 = (mx, my) if self.hovered_node is None else self._to_screen(nodes[self.hovered_node].position)
         self._draw_dashed_line(C_PREVIEW, p1, p2, 1, 8)
 
     def _draw_nodes(self, nodes):
-        for node in nodes:
-            sp     = self._to_screen(node.position)
+        for i, node in enumerate(nodes):
+            sp = self._to_screen(node.position)
             radius = self._node_radius(node)
-            color  = self._node_color(node.nodeType)
+            color = self._node_color(node.nodeType)
 
-            if node is self.selected_node:
+            if i == self.selected_node:
                 pygame.draw.circle(self.surface, C_SELECT_RING, sp, radius + 6, 2)
-            elif node is self.hovered_node and self.selected_node is not None:
+            elif i == self.hovered_node and self.selected_node is not None:
                 pygame.draw.circle(self.surface, (200, 200, 255), sp, radius + 5, 2)
 
             pygame.draw.circle(self.surface, color, sp, radius)
 
     # --- Panel --------------------------------------------------------
 
-    def _draw_panel(self):
+    def _draw_panel(self, money: float, moneyPerDay: float):
         sw = self.surface.get_width()
         sh = self.surface.get_height()
 
@@ -561,7 +627,6 @@ class GUI:
         btn_gap = self._btn_gap()
         lvl_h   = self._level_box_h()
 
-        # Rebuild fonts each frame so they stay sharp after resize.
         font_md = _font(20, self.surface)
         font_sm = _font(16, self.surface)
         font_lg = _font(28, self.surface)
@@ -576,13 +641,72 @@ class GUI:
         bw = pw - pad * 2
         y  = pad
 
+        # ── Playback controls ──────────────────────────────────────────
+        ctrl_btn_w = (bw - btn_gap) // 2
+
+        # Pause / Play button
+        pause_rect = pygame.Rect(x, y, ctrl_btn_w, btn_h)
+        self._pause_btn_rect = pause_rect
+        pause_color = C_PAUSE_BTN_PAUSED if self.paused else C_PAUSE_BTN
+        pygame.draw.rect(self.surface, pause_color, pause_rect, border_radius=6)
+        pause_label = "> Play" if self.paused else "|| Pause"
+        p_surf = font_md.render(pause_label, True, C_BTN_TEXT_A)
+        self.surface.blit(p_surf, p_surf.get_rect(center=pause_rect.center))
+
+        # Speed button
+        speed_rect = pygame.Rect(x + ctrl_btn_w + btn_gap, y, bw - ctrl_btn_w - btn_gap, btn_h)
+        self._speed_btn_rect = speed_rect
+        speed_color = C_SPEED_BTN_MAX if self.game_speed == SPEED_STEPS[-1] else C_SPEED_BTN
+        pygame.draw.rect(self.surface, speed_color, speed_rect, border_radius=6)
+        speed_label = f"x{self.game_speed}"
+        s_surf = font_md.render(speed_label, True, C_BTN_TEXT_A)
+        self.surface.blit(s_surf, s_surf.get_rect(center=speed_rect.center))
+
+        y += btn_h + pad
+
+        # Divider
+        pygame.draw.line(self.surface, C_PANEL_EDGE, (x, y), (x + bw, y), 1)
+        y += pad
+
+        # ── Money display ──
+        font_money_label = _font(16, self.surface)
+        font_money_val = _font(30, self.surface, bold=True)
+
+        money_label_surf = font_money_label.render("BALANCE", True, C_HINT)
+        self.surface.blit(money_label_surf, money_label_surf.get_rect(centerx=px + pw // 2, y=y))
+        y += money_label_surf.get_height() + 2
+
+        money_color = (11, 133, 120) if money >= 0 else (200, 80, 60)
+        money_str = f"${money:,.2f}M"
+        money_surf = font_money_val.render(money_str, True, money_color)
+
+        font_money_day = _font(16, self.surface)
+        day_color = (11, 133, 120) if moneyPerDay >= 0 else (200, 80, 60)
+        day_sign = "+" if moneyPerDay >= 0 else ""
+        day_str = f"{day_sign}${moneyPerDay * 1000:,.2f}k / day"
+        day_surf = font_money_day.render(day_str, True, day_color)
+
+        pill_h = font_money_val.get_height() + day_surf.get_height() + pad + 6
+        pill_rect = pygame.Rect(x, y, bw, pill_h)
+        pygame.draw.rect(self.surface, C_LEVEL_BG, pill_rect, border_radius=8)
+        self.surface.blit(money_surf, money_surf.get_rect(centerx=pill_rect.centerx,
+                                                          y=pill_rect.y + pad // 2))
+        self.surface.blit(day_surf, day_surf.get_rect(centerx=pill_rect.centerx,
+                                                      y=pill_rect.y + pad // 2 + font_money_val.get_height() + 2))
+        y += pill_rect.height + pad
+
+        # Divider before connection controls
+        pygame.draw.line(self.surface, C_PANEL_EDGE,
+                         (x, y), (x + bw, y), 1)
+        y += pad
+
         # ── Title ──
-        lbl = font_md.render("new connection", True, C_BTN_TEXT)
+        lbl = font_md.render("New Connection", True, C_BTN_TEXT)
         self.surface.blit(lbl, (x, y))
         y += lbl.get_height() + pad // 2
 
         # ── Type buttons ──
-        lbl = font_sm.render("type", True, C_HINT)
+        lbl = font_sm.render("Type", True, C_HINT)
         self.surface.blit(lbl, (x, y))
         y += lbl.get_height() + 4
 
@@ -599,22 +723,37 @@ class GUI:
 
         y += pad // 2
 
-        # ── Level ──
-        lbl = font_sm.render("level  (scroll to adjust)", True, C_HINT)
+        self._draw_type_tooltip()
+
+        # ── Level — now controlled by clickable − / + buttons ──
+        lbl = font_sm.render("Level", True, C_HINT)
         self.surface.blit(lbl, (x, y))
         y += lbl.get_height() + 4
 
         lvl_rect = pygame.Rect(x, y, bw, lvl_h)
         pygame.draw.rect(self.surface, C_LEVEL_BG, lvl_rect, border_radius=6)
 
-        minus = font_lg.render("−", True, C_HINT)
-        self.surface.blit(minus, minus.get_rect(midleft=(x + pad, lvl_rect.centery)))
+        # − button (left third)
+        minus_w = lvl_h  # square
+        minus_rect = pygame.Rect(lvl_rect.x, lvl_rect.y, minus_w, lvl_h)
+        minus_color = C_BTN if self.active_level > 1 else (200, 200, 200)
+        pygame.draw.rect(self.surface, minus_color, minus_rect, border_radius=6)
+        minus_surf = font_lg.render("−", True, C_BTN_TEXT if self.active_level > 1 else C_HINT)
+        self.surface.blit(minus_surf, minus_surf.get_rect(center=minus_rect.center))
+        self._level_minus_rect = minus_rect
 
+        # + button (right third)
+        plus_rect = pygame.Rect(lvl_rect.right - minus_w, lvl_rect.y, minus_w, lvl_h)
+        plus_color = C_BTN if self.active_level < 10 else (200, 200, 200)
+        pygame.draw.rect(self.surface, plus_color, plus_rect, border_radius=6)
+        plus_surf = font_lg.render("+", True, C_BTN_TEXT if self.active_level < 10 else C_HINT)
+        self.surface.blit(plus_surf, plus_surf.get_rect(center=plus_rect.center))
+        self._level_plus_rect = plus_rect
+
+        # Level number (centre)
         num = font_lg.render(str(self.active_level), True, C_LEVEL_TEXT)
         self.surface.blit(num, num.get_rect(center=lvl_rect.center))
 
-        plus = font_lg.render("+", True, C_HINT)
-        self.surface.blit(plus, plus.get_rect(midright=(x + bw - pad, lvl_rect.centery)))
         y += lvl_h + pad
 
         # ── Status ──
@@ -639,33 +778,73 @@ class GUI:
         hint = font_sm.render("esc / right-click: cancel", True, C_HINT)
         self.surface.blit(hint, hint.get_rect(centerx=px + pw // 2, y=y))
 
-    _CONNECTION_HIT_RADIUS = 8  # px from midpoint to trigger hover
+    _CONNECTION_HIT_RADIUS = 8
 
     def _connection_at(self, nodes: list, screen_pos):
-        """Return the connection whose screen-space midpoint is closest to
-        screen_pos (within _CONNECTION_HIT_RADIUS), or None."""
-        best_conn = None
+        best_idx = None
         best_dist = self._CONNECTION_HIT_RADIUS + 1
         seen = set()
+        all_conns = []
         for node in nodes:
             for conn in node.connections:
                 if id(conn) in seen:
                     continue
                 seen.add(id(conn))
-                p1 = self._to_screen(conn.nodes[0].position)
-                p2 = self._to_screen(conn.nodes[1].position)
-                mid = ((p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2)
-                dist = math.hypot(screen_pos[0] - mid[0], screen_pos[1] - mid[1])
-                if dist < best_dist:
-                    best_dist = dist
-                    best_conn = conn
-        return best_conn
+                all_conns.append(conn)
 
-    def _draw_connection_tooltip(self):
-        """Draw a tooltip for self.hovered_conn near the mouse cursor."""
-        conn = self.hovered_conn
-        if conn is None:
+        # Build the same pair_map as _draw_connections so we can
+        # replicate the lateral offset for each parallel connection.
+        pair_map: dict[frozenset, list] = {}
+        for conn in all_conns:
+            key = frozenset([id(conn.nodes[0]), id(conn.nodes[1])])
+            pair_map.setdefault(key, []).append(conn)
+
+        for i, conn in enumerate(all_conns):
+            key = frozenset([id(conn.nodes[0]), id(conn.nodes[1])])
+            siblings = pair_map[key]
+            n = len(siblings)
+            sibling_idx = siblings.index(conn)
+            offset = (sibling_idx - (n - 1) / 2) * CONNECTION_OFFSET * self.zoom
+
+            p1 = self._to_screen(conn.nodes[0].position)
+            p2 = self._to_screen(conn.nodes[1].position)
+            op1, op2 = self._offset_line(p1, p2, offset)
+
+            # Point-to-segment distance instead of point-to-midpoint.
+            dx, dy = op2[0] - op1[0], op2[1] - op1[1]
+            seg_len_sq = dx * dx + dy * dy
+            if seg_len_sq == 0:
+                dist = math.hypot(screen_pos[0] - op1[0], screen_pos[1] - op1[1])
+            else:
+                t = max(0.0, min(1.0, (
+                        (screen_pos[0] - op1[0]) * dx +
+                        (screen_pos[1] - op1[1]) * dy
+                ) / seg_len_sq))
+                closest_x = op1[0] + t * dx
+                closest_y = op1[1] + t * dy
+                dist = math.hypot(screen_pos[0] - closest_x, screen_pos[1] - closest_y)
+
+            if dist < best_dist:
+                best_dist = dist
+                best_idx = i
+
+        return best_idx
+
+    def _draw_connection_tooltip(self, nodes: list):
+        if self.hovered_conn is None:
             return
+        seen = set()
+        all_conns = []
+        for node in nodes:
+            for conn in node.connections:
+                if id(conn) in seen:
+                    continue
+                seen.add(id(conn))
+                all_conns.append(conn)
+        if self.hovered_conn >= len(all_conns):
+            self.hovered_conn = None
+            return
+        conn = all_conns[self.hovered_conn]
 
         font_title = _font(25, self.surface, bold=True)
         font_body = _font(20, self.surface)
@@ -681,11 +860,10 @@ class GUI:
 
         title_text = conn.type.name.capitalize()
 
-        # 1 title + 1 level line + 2×(label + bar) rows
         box_h = (font_title.get_height() + pad
                  + 6
-                 + (line_h + 2)  # "Level: x"
-                 + 2 * (line_h + 2 + bar_h + 6)  # "People:" + bar, "Goods:" + bar
+                 + (line_h + 2)
+                 + 2 * (line_h + 2 + bar_h + 6)
                  + pad)
         box_w = max(180, _scale(210, self.surface))
 
@@ -703,22 +881,18 @@ class GUI:
 
         y = ty + pad
 
-        # Title
         title_surf = font_title.render(title_text, True, (30, 30, 30))
         self.surface.blit(title_surf, (tx + pad, y))
         y += font_title.get_height() + 4
 
-        # Divider
         pygame.draw.line(self.surface, (200, 200, 200),
                          (tx + pad, y), (tx + box_w - pad, y), 1)
         y += 6
 
-        # Level
         level_surf = font_body.render(f"Level: {conn.level}", True, (60, 60, 60))
         self.surface.blit(level_surf, (tx + pad, y))
         y += line_h + 2
 
-        # Resource rows: label then bar
         bar_total_w = box_w - pad * 2
         for label, load, cap in [("People", load_people, cap_people),
                                  ("Goods", load_goods, cap_goods)]:
@@ -738,3 +912,153 @@ class GUI:
                                  pygame.Rect(tx + pad, y, fill_w, bar_h),
                                  border_radius=2)
             y += bar_h + 6
+
+    CONNECTION_COSTS = {
+        "Passenger Rail": 75,
+        "Freight Rail": 35,
+        "Highway": 6,
+    }
+    CONNECTION_UPKEEP_COSTS = {
+        "Passenger Rail": 0.0125,
+        "Freight Rail": 0.05 / 365.0,
+        "Highway": 0.035 / 365.0,
+    }
+
+    def _draw_type_tooltip(self):
+        if self._hovered_type_idx is None:
+            return
+        if self._hovered_type_idx >= len(self._type_btn_rects):
+            return
+
+        import util
+        ct = CONNECTION_TYPES[self._hovered_type_idx]
+        name = ct["name"]
+        btn_rect = self._type_btn_rects[self._hovered_type_idx]
+
+        cap_people, cap_goods = util.connectionTypes[name].capacity
+        cost = self.CONNECTION_COSTS.get(name, 0)
+        upkeep = self.CONNECTION_UPKEEP_COSTS.get(name, 0)
+
+        font_title = _font(22, self.surface, bold=True)
+        font_body = _font(18, self.surface)
+        pad = 8
+        line_h = font_body.get_height()
+
+        rows = [
+            f"People cap: {cap_people}",
+            f"Goods cap:  {cap_goods}",
+            f"Cost:   ${cost * self.active_level}M / mi",
+            f"Upkeep: ${upkeep * self.active_level * 1000:.4f}k / mi / day",
+        ]
+
+        title_surf = font_title.render(name, True, (30, 30, 30))
+        max_text_w = max(title_surf.get_width(),
+                         max(font_body.render(r, True, (0, 0, 0)).get_width() for r in rows))
+        box_w = max_text_w + pad * 2
+        box_h = font_title.get_height() + 4 + 1 + 6 + len(rows) * (line_h + 2) + pad * 2
+
+        # Position: below the hovered button, right-aligned to the panel left edge
+        tx = btn_rect.left - box_w - 6
+        ty = btn_rect.top
+
+        # Keep on screen vertically
+        sh = self.surface.get_height()
+        if ty + box_h > sh - 4:
+            ty = sh - box_h - 4
+
+        box = pygame.Rect(tx, ty, box_w, box_h)
+        pygame.draw.rect(self.surface, (255, 255, 255), box, border_radius=8)
+        pygame.draw.rect(self.surface, (180, 180, 180), box, width=1, border_radius=8)
+
+        y = ty + pad
+        self.surface.blit(title_surf, (tx + pad, y))
+        y += font_title.get_height() + 4
+        pygame.draw.line(self.surface, (200, 200, 200),
+                         (tx + pad, y), (tx + box_w - pad, y), 1)
+        y += 6
+
+        divider_row = 2  # draw a divider before cost rows
+        for i, row in enumerate(rows):
+            if i == divider_row:
+                pygame.draw.line(self.surface, (220, 220, 220),
+                                 (tx + pad, y - 3), (tx + box_w - pad, y - 3), 1)
+            color = (60, 60, 60) if i >= divider_row else (80, 80, 80)
+            surf = font_body.render(row, True, color)
+            self.surface.blit(surf, (tx + pad, y))
+            y += line_h + 2
+
+    def _draw_connection_preview_tooltip(self, nodes: list):
+        """Projected build cost, upkeep, and daily income when hovering a target node."""
+        if self.selected_node is None or self.hovered_node is None:
+            return
+        if self.hovered_node == self.selected_node:
+            return
+
+        node_a = nodes[self.selected_node]
+        node_b = nodes[self.hovered_node]
+
+        dx = node_b.position[0] - node_a.position[0]
+        dy = node_b.position[1] - node_a.position[1]
+        # Divide by whatever constant maps your world coords → miles/km.
+        # 100 is a reasonable default; tune to match your game's scale.
+        distance = math.hypot(dx, dy) / 10
+
+        ct_name = CONNECTION_TYPES[self.active_type_idx]["name"]
+        level = self.active_level
+        build_cost = self.CONNECTION_COSTS.get(ct_name, 0) * level * distance
+        daily_upkeep = self.CONNECTION_UPKEEP_COSTS.get(ct_name, 0) * level * distance
+
+        font_title = _font(22, self.surface, bold=True)
+        font_body = _font(18, self.surface)
+        pad = 10
+        line_h = font_body.get_height()
+
+        rows = [
+            ("Build cost", f"${build_cost:,.2f}M", (200, 80, 60)),
+            ("Daily upkeep", f"-${daily_upkeep * 1000:,.3f}k / day", (209, 151, 17)),
+        ]
+
+        title_text = f"Build {ct_name}  (Lv.{level})"
+        title_surf = font_title.render(title_text, True, (30, 30, 30))
+
+        max_row_w = max(
+            font_body.render(label + "  " + val, True, (0, 0, 0)).get_width()
+            for label, val, _ in rows
+        )
+        box_w = max(title_surf.get_width(), max_row_w) + pad * 2
+        box_h = (pad
+                 + font_title.get_height() + 4
+                 + 1 + 6  # divider
+                 + len(rows) * (line_h + 4)
+                 + pad)
+
+        # Anchor tooltip near the hovered node, offset so it doesn't cover it.
+        sp = self._to_screen(node_b.position)
+        node_r = self._node_radius(node_b)
+        tx = sp[0] + node_r + 12
+        ty = sp[1] - box_h // 2
+
+        canvas_w = self.canvas_rect().width
+        sh = self.surface.get_height()
+        if tx + box_w > canvas_w - 4:
+            tx = sp[0] - node_r - box_w - 12
+        ty = max(4, min(ty, sh - box_h - 4))
+
+        box = pygame.Rect(tx, ty, box_w, box_h)
+        pygame.draw.rect(self.surface, (255, 255, 255), box, border_radius=8)
+        pygame.draw.rect(self.surface, (180, 180, 180), box, width=1, border_radius=8)
+
+        y = ty + pad
+        self.surface.blit(title_surf, (tx + pad, y))
+        y += font_title.get_height() + 4
+
+        pygame.draw.line(self.surface, (200, 200, 200),
+                         (tx + pad, y), (tx + box_w - pad, y), 1)
+        y += 6
+
+        for label, val, color in rows:
+            lbl_surf = font_body.render(label, True, (80, 80, 80))
+            val_surf = font_body.render(val, True, color)
+            self.surface.blit(lbl_surf, (tx + pad, y))
+            self.surface.blit(val_surf, (tx + box_w - pad - val_surf.get_width(), y))
+            y += line_h + 4
