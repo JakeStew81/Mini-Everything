@@ -19,6 +19,12 @@ CONNECTION_TYPES: list[dict] = [
     {"name": "Freight Rail",    "color": (122, 82, 13), "dash": False},
 ]
 
+JUNCTION_COSTS = { # $million per level
+    "Passenger Rail": 15,
+    "Freight Rail": 0.25,
+    "Highway": 6
+}
+
 CONNECTION_TYPE_STYLES: dict[str, dict] = {t["name"]: t for t in CONNECTION_TYPES}
 
 BASE_NODE_RADIUS      = 10
@@ -234,6 +240,11 @@ class GUI:
         self.active_level    = 1
         self.hovered_node    = None
         self.hovered_conn    = None
+
+        # Junction targeting: index into _cached_all_conns of a same-type
+        # connection the player is hovering while a node is selected.
+        self.hovered_junction_conn: int | None = None
+
         self._type_btn_rects: list[pygame.Rect] = []
         self.game_speed = 1
         self.paused = True
@@ -290,7 +301,69 @@ class GUI:
         h = self.surface.get_height()
         return pygame.Rect(0, 0, w - self._panel_width(), h)
 
-    def handle_event(self, event, nodes, on_connect, on_upgrade_connection):
+    def _screen_to_world(self, screen_pos) -> tuple[float, float]:
+        """Convert a screen-space position to world-space coordinates."""
+        cx = self.canvas_rect().width / 2
+        cy = self.surface.get_height() / 2
+        s  = self._pos_scale()
+        wx = (screen_pos[0] - cx) / s - self._pan_offset[0]
+        wy = (screen_pos[1] - cy) / s - self._pan_offset[1]
+        return (wx, wy)
+
+    def _closest_point_on_conn(self, conn, screen_pos) -> tuple[float, float]:
+        """
+        Return the world-space position of the closest point on a connection's
+        rendered line segment to the given screen position.
+        Accounts for the lateral offset used when parallel connections exist.
+        """
+        # We need the sibling count to replicate the offset, but since this is
+        # called after _gather_connection_pairs we can compute it on the fly.
+        pair_map = self._gather_connection_pairs_cached()
+        key = frozenset([id(conn.nodes[0]), id(conn.nodes[1])])
+        siblings = pair_map.get(key, [conn])
+        n = len(siblings)
+        try:
+            sibling_idx = next(i for i, s in enumerate(siblings) if id(s) == id(conn))
+        except StopIteration:
+            sibling_idx = 0
+        offset = (sibling_idx - (n - 1) / 2) * CONNECTION_OFFSET * self.zoom
+
+        p1 = self._to_screen(conn.nodes[0].position)
+        p2 = self._to_screen(conn.nodes[1].position)
+        op1, op2 = self._offset_line(p1, p2, offset)
+
+        dx, dy = op2[0] - op1[0], op2[1] - op1[1]
+        seg_len_sq = dx * dx + dy * dy
+        if seg_len_sq == 0:
+            closest_screen = op1
+        else:
+            t = max(0.0, min(1.0, (
+                (screen_pos[0] - op1[0]) * dx +
+                (screen_pos[1] - op1[1]) * dy
+            ) / seg_len_sq))
+            closest_screen = (op1[0] + t * dx, op1[1] + t * dy)
+
+        return self._screen_to_world(closest_screen)
+
+    # Cache for the pair_map so we don't rebuild it multiple times per frame.
+    _pair_map_cache: dict | None = None
+    _pair_map_nodes_id: int | None = None
+
+    def _gather_connection_pairs_cached(self) -> dict:
+        """Return the pair_map; rebuilt whenever _cached_all_conns changes."""
+        return getattr(self, '_pair_map_last', {})
+
+    def handle_event(self, event, nodes, on_connect, on_upgrade_connection, on_junction=None):
+        """
+        on_junction(world_pos: tuple[float, float], conn_type: str, from_node, level: int) -> bool
+            Called when the player targets a connection instead of a node.
+            world_pos   – world-space position of the snap point on the connection.
+            conn_type   – name of the active connection type (e.g. "Highway").
+            from_node   – the node object the player started the connection from.
+            level       – the active connection level selected in the panel.
+            Should create a junction node at world_pos and wire everything up.
+            Return True on success, False on failure (e.g. insufficient funds).
+        """
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             pos = event.pos
 
@@ -326,20 +399,39 @@ class GUI:
                 return True
 
             if self.canvas_rect().collidepoint(pos):
-                clicked = self._node_at(nodes, pos)  # now returns an index
-                if clicked is None:
+                clicked_node = self._node_at(nodes, pos)
+
+                if clicked_node is None:
+                    # ── Check for junction click (node selected + hovering same-type conn) ──
+                    if (self.selected_node is not None
+                            and on_junction is not None
+                            and self.hovered_junction_conn is not None):
+                        all_conns = getattr(self, '_cached_all_conns', [])
+                        if self.hovered_junction_conn < len(all_conns):
+                            target_conn = all_conns[self.hovered_junction_conn]
+                            world_pos = self._closest_point_on_conn(target_conn, pos)
+                            conn_type = CONNECTION_TYPES[self.active_type_idx]["name"]
+                            from_node = nodes[self.selected_node]
+                            success = on_junction(world_pos, conn_type, from_node, all_conns[self.hovered_junction_conn])
+                            if not success:
+                                self.show_flash("Insufficient funds for junction")
+                            else:
+                                self.selected_node = None
+                            return True
+
                     self.selected_node = None
+
                 elif self.selected_node is None:
-                    self.selected_node = clicked
-                elif clicked == self.selected_node:  # was `is`, now `==`
+                    self.selected_node = clicked_node
+                elif clicked_node == self.selected_node:
                     self.selected_node = None
                 else:
                     type_name = CONNECTION_TYPES[self.active_type_idx]["name"]
-                    success = on_connect(nodes[self.selected_node], nodes[clicked], type_name, self.active_level)
+                    success = on_connect(nodes[self.selected_node], nodes[clicked_node], type_name, self.active_level)
                     if not success:
                         ct_name = CONNECTION_TYPES[self.active_type_idx]["name"]
-                        dx = nodes[clicked].position[0] - nodes[self.selected_node].position[0]
-                        dy = nodes[clicked].position[1] - nodes[self.selected_node].position[1]
+                        dx = nodes[clicked_node].position[0] - nodes[self.selected_node].position[0]
+                        dy = nodes[clicked_node].position[1] - nodes[self.selected_node].position[1]
                         dist = math.hypot(dx, dy) / 10
                         cost = self.CONNECTION_COSTS.get(ct_name, 0) * self.active_level * dist
                         self.show_flash(
@@ -364,8 +456,12 @@ class GUI:
             if event.key == pygame.K_x and self.hovered_conn is not None:
                 all_conns = getattr(self, '_cached_all_conns', [])
                 if self.hovered_conn < len(all_conns):
-                    on_upgrade_connection(all_conns[self.hovered_conn])
+                    res = on_upgrade_connection(all_conns[self.hovered_conn])
+                    if res != "":
+                        self.show_flash(res)
                 return True
+            if event.key == pygame.K_SPACE:
+                self.paused = not self.paused
 
         elif event.type == pygame.MOUSEWHEEL:
             # Only zoom when the cursor is over the canvas
@@ -374,43 +470,42 @@ class GUI:
                 old_zoom = self.zoom
                 new_zoom = max(ZOOM_MIN, min(ZOOM_MAX, self.zoom + event.y * ZOOM_STEP))
 
-                # Zoom toward the cursor position so it stays fixed on screen.
-                # Convert cursor to canvas-center-relative coords before/after.
                 canvas = self.canvas_rect()
                 cx = canvas.width  / 2
                 cy = self.surface.get_height() / 2
 
-                # Screen offset of cursor from canvas center
                 dx = mouse_pos[0] - cx
                 dy = mouse_pos[1] - cy
 
-                # Adjust pan so the world point under the cursor stays put.
-                # The world coordinate under the cursor before zoom:
-                #   world_x = dx / (ps * old_zoom) - pan_offset[0]
-                # We want that same world_x to map to the same screen dx after zoom:
-                #   dx / (ps * new_zoom) - pan_offset[0]' = world_x
-                # Solving: pan_offset[0]' = dx/ps * (1/new_zoom - 1/old_zoom) + pan_offset[0]
-                # So the delta to add is dx/ps * (1/new_zoom - 1/old_zoom)
                 self.zoom = new_zoom
                 ps = self._pos_scale_base()
                 self._pan_offset[0] += dx / ps * (1.0 / new_zoom - 1.0 / old_zoom)
                 self._pan_offset[1] += dy / ps * (1.0 / new_zoom - 1.0 / old_zoom)
                 return True
 
-
-
         elif event.type == pygame.MOUSEMOTION:
             if self.canvas_rect().collidepoint(event.pos):
                 self.hovered_node = self._node_at(nodes, event.pos)
+
                 if self.hovered_node is None:
+                    # Standard connection hover (for inspection tooltip / X-upgrade)
                     self.hovered_conn = self._connection_at(nodes, event.pos)
+
+                    # Junction hover: only active when a node is selected.
+                    # Find the nearest same-type connection within hit radius.
+                    if self.selected_node is not None:
+                        self.hovered_junction_conn = self._junction_conn_at(nodes, event.pos)
+                    else:
+                        self.hovered_junction_conn = None
                 else:
                     self.hovered_conn = None
-                self._hovered_type_idx = None  # cursor is on canvas, not panel
+                    self.hovered_junction_conn = None
+
+                self._hovered_type_idx = None
             else:
                 self.hovered_node = None
                 self.hovered_conn = None
-                # Check if hovering a connection type button
+                self.hovered_junction_conn = None
                 self._hovered_type_idx = None
                 for i, rect in enumerate(self._type_btn_rects):
                     if rect.collidepoint(event.pos):
@@ -418,7 +513,7 @@ class GUI:
                         break
         return False
 
-    def update(self, nodes: list, money: float, moneyPerDay: float):
+    def update(self, nodes: list, money: float, moneyPerMonth: float):
         self.surface.fill(C_TITLE_BG)
         canvas = self.canvas_rect()
 
@@ -433,9 +528,11 @@ class GUI:
         self.surface.set_clip(old_clip)
         self._draw_node_tooltip(nodes)
         self._draw_connection_tooltip(nodes)
-        self._draw_panel(nodes, money, moneyPerDay)
+        self._draw_panel(nodes, money, moneyPerMonth)
         self._draw_zoom_indicator()
         self._draw_connection_preview_tooltip(nodes)
+        # Must come after _draw_connection_preview_tooltip so it draws on top
+        self._draw_junction_preview_tooltip(nodes)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -597,6 +694,8 @@ class GUI:
 
     def _draw_connections(self, nodes):
         pair_map = self._gather_connection_pairs(nodes)
+        # Cache for junction detection later in the same frame
+        self._pair_map_last = pair_map
 
         for key, connections in pair_map.items():
             n = len(connections)
@@ -610,21 +709,33 @@ class GUI:
                 width = max(1, int((BASE_CONNECTION_WIDTH + c.level * CONNECTION_WIDTH_PER_LEVEL) * self.zoom))
                 dash_len = max(4, int(10 * self.zoom))
 
-                # Tint toward red based on fullness (max of people/goods load ratio)
                 cap_people, cap_goods = c.capacity
                 load_people, load_goods = c.load
                 used_people = cap_people - load_people
                 used_goods = cap_goods - load_goods
                 p_ratio = (used_people / cap_people) if cap_people > 0 else 0.0
                 g_ratio = (used_goods / cap_goods) if cap_goods > 0 else 0.0
-                full_ratio = max(p_ratio, g_ratio)  # 0.0 = empty, 1.0 = full
+                full_ratio = max(p_ratio, g_ratio)
                 full_ratio = max(0.0, min(1.0, full_ratio))
                 full_ratio = 0 if full_ratio < 0.5 else full_ratio
 
-                # Blend base_color → red by up to 50%
                 red = (200, 80, 60)
-                t = full_ratio  # 0.0 → 0.5
+                t = full_ratio
                 color = tuple(int(base_color[j] * (1 - t) + red[j] * t) for j in range(3))
+
+                # Highlight the junction-hovered connection
+                all_conns = getattr(self, '_cached_all_conns', [])
+                jconn_idx = self.hovered_junction_conn
+                is_junction_target = (
+                    jconn_idx is not None
+                    and jconn_idx < len(all_conns)
+                    and id(all_conns[jconn_idx]) == id(c)
+                )
+                if is_junction_target:
+                    # Draw a bright highlight stroke behind the connection line
+                    highlight_color = (255, 220, 60)
+                    hw = width + max(3, int(4 * self.zoom))
+                    pygame.draw.line(self.surface, highlight_color, op1, op2, hw)
 
                 if style.get("dash"):
                     self._draw_dashed_line(color, op1, op2, width,
@@ -632,12 +743,33 @@ class GUI:
                 else:
                     pygame.draw.line(self.surface, color, op1, op2, width)
 
+                # Draw a small diamond snap-point when junction-hovering
+                if is_junction_target:
+                    snap_sp = self._snap_screen_pos
+                    if snap_sp:
+                        sr = max(5, int(6 * self.zoom))
+                        pts = [
+                            (snap_sp[0],      snap_sp[1] - sr),
+                            (snap_sp[0] + sr, snap_sp[1]),
+                            (snap_sp[0],      snap_sp[1] + sr),
+                            (snap_sp[0] - sr, snap_sp[1]),
+                        ]
+                        pygame.draw.polygon(self.surface, (255, 220, 60), pts)
+                        pygame.draw.polygon(self.surface, (200, 140, 0), pts, 1)
+
     def _draw_preview(self, nodes):
         if self.selected_node is None:
             return
         p1 = self._to_screen(nodes[self.selected_node].position)
-        mx, my = pygame.mouse.get_pos()
-        p2 = (mx, my) if self.hovered_node is None else self._to_screen(nodes[self.hovered_node].position)
+
+        if self.hovered_junction_conn is not None and self.hovered_node is None:
+            # Snap preview line endpoint to the junction snap point on the connection
+            p2 = self._snap_screen_pos if self._snap_screen_pos else pygame.mouse.get_pos()
+        elif self.hovered_node is None:
+            p2 = pygame.mouse.get_pos()
+        else:
+            p2 = self._to_screen(nodes[self.hovered_node].position)
+
         self._draw_dashed_line(C_PREVIEW, p1, p2, 1, 8)
 
     def _draw_nodes(self, nodes):
@@ -647,13 +779,12 @@ class GUI:
             radius = self._node_radius(node)
             base_color = self._node_color(node.nodeType)
 
-            # Tint darker based on unmet needs (0% unmet = original, 100% unmet = 50% darker)
             met, total = node.ratioNeedsMet()
             if total > 0:
-                unmet_ratio = 1.0 - (met / total)  # 0.0 = all met, 1.0 = none met
+                unmet_ratio = 1.0 - (met / total)
             else:
                 unmet_ratio = 0.0
-            dark_factor = 1.0 - (unmet_ratio * 0.5)  # ranges from 1.0 down to 0.5
+            dark_factor = 1.0 - (unmet_ratio * 0.5)
             color = tuple(int(c * dark_factor) for c in base_color)
 
             if i == self.selected_node:
@@ -662,10 +793,11 @@ class GUI:
                 pygame.draw.circle(self.surface, (200, 200, 255), sp, radius + 5, 2)
 
             pygame.draw.circle(self.surface, color, sp, radius)
+            self._last_node_positions[i] = sp
 
     # --- Panel --------------------------------------------------------
 
-    def _draw_panel(self, nodes, money: float, moneyPerDay: float):
+    def _draw_panel(self, nodes, money: float, moneyPerMonth: float):
         sw = self.surface.get_width()
         sh = self.surface.get_height()
 
@@ -692,7 +824,6 @@ class GUI:
         # ── Playback controls ──────────────────────────────────────────
         ctrl_btn_w = (bw - btn_gap) // 2
 
-        # Pause / Play button
         pause_rect = pygame.Rect(x, y, ctrl_btn_w, btn_h)
         self._pause_btn_rect = pause_rect
         pause_color = C_PAUSE_BTN_PAUSED if self.paused else C_PAUSE_BTN
@@ -701,7 +832,6 @@ class GUI:
         p_surf = font_md.render(pause_label, True, C_BTN_TEXT_A)
         self.surface.blit(p_surf, p_surf.get_rect(center=pause_rect.center))
 
-        # Speed button
         speed_rect = pygame.Rect(x + ctrl_btn_w + btn_gap, y, bw - ctrl_btn_w - btn_gap, btn_h)
         self._speed_btn_rect = speed_rect
         speed_color = C_SPEED_BTN_MAX if self.game_speed == SPEED_STEPS[-1] else C_SPEED_BTN
@@ -712,7 +842,6 @@ class GUI:
 
         y += btn_h + pad
 
-        # Divider
         pygame.draw.line(self.surface, C_PANEL_EDGE, (x, y), (x + bw, y), 1)
         y += pad
 
@@ -725,13 +854,13 @@ class GUI:
         y += money_label_surf.get_height() + 2
 
         money_color = (11, 133, 120) if money >= 0 else (200, 80, 60)
-        money_str = f"${money:,.2f}M"
+        money_str = f"${money if money < 1000 else money / 1000:,.2f}{'M' if money < 1000 else 'B'}"
         money_surf = font_money_val.render(money_str, True, money_color)
 
         font_money_day = _font(16, self.surface)
-        day_color = (11, 133, 120) if moneyPerDay >= 0 else (200, 80, 60)
-        day_sign = "+" if moneyPerDay >= 0 else ""
-        day_str = f"{day_sign}${moneyPerDay * 1000:,.2f}k / day"
+        day_color = (11, 133, 120) if moneyPerMonth >= 0 else (200, 80, 60)
+        day_sign = "+" if moneyPerMonth >= 0 else ""
+        day_str = f"{day_sign}${moneyPerMonth * 1000 if moneyPerMonth < 1 else moneyPerMonth:,.2f}{'k' if moneyPerMonth < 1 else 'M'} / month"
         day_surf = font_money_day.render(day_str, True, day_color)
 
         pill_h = font_money_val.get_height() + day_surf.get_height() + pad + 6
@@ -744,7 +873,6 @@ class GUI:
         y += pill_rect.height + pad
 
         # ── City needs met bar ─────────────────────────────────────────
-        # Compute aggregate needs met across all nodes
         total_met = 0.0
         total_needed = 0.0
         for node in nodes:
@@ -758,15 +886,14 @@ class GUI:
                           needs_label_surf.get_rect(centerx=px + pw // 2, y=y))
         y += needs_label_surf.get_height() + 2
 
-        # Color: green → amber → orange → red
         if needs_pct >= 80:
-            needs_color = (11, 133, 120)  # teal/green
+            needs_color = (11, 133, 120)
         elif needs_pct >= 60:
-            needs_color = (209, 151, 17)  # amber
+            needs_color = (209, 151, 17)
         elif needs_pct >= 40:
-            needs_color = (220, 100, 40)  # orange
+            needs_color = (220, 100, 40)
         else:
-            needs_color = (200, 80, 60)  # red
+            needs_color = (200, 80, 60)
 
         needs_pill_h = font_money_val.get_height() + 10
         needs_pill_rect = pygame.Rect(x, y, bw, needs_pill_h)
@@ -779,7 +906,6 @@ class GUI:
         ))
         y += needs_pill_h + 4
 
-        # Progress bar
         bar_h_needs = max(6, _scale(8, self.surface))
         bar_rect_needs = pygame.Rect(x, y, bw, bar_h_needs)
         pygame.draw.rect(self.surface, (200, 200, 200), bar_rect_needs, border_radius=4)
@@ -789,7 +915,6 @@ class GUI:
                              pygame.Rect(x, y, fill_w_needs, bar_h_needs), border_radius=4)
         y += bar_h_needs + pad
 
-        # Divider before connection controls
         pygame.draw.line(self.surface, C_PANEL_EDGE,
                          (x, y), (x + bw, y), 1)
         y += pad
@@ -819,41 +944,10 @@ class GUI:
 
         self._draw_type_tooltip()
 
-        # ── Level — now controlled by clickable − / + buttons ──
-        lbl = font_sm.render("Level", True, C_HINT)
-        self.surface.blit(lbl, (x, y))
-        y += lbl.get_height() + 4
-
-        lvl_rect = pygame.Rect(x, y, bw, lvl_h)
-        pygame.draw.rect(self.surface, C_LEVEL_BG, lvl_rect, border_radius=6)
-
-        # − button (left third)
-        minus_w = lvl_h  # square
-        minus_rect = pygame.Rect(lvl_rect.x, lvl_rect.y, minus_w, lvl_h)
-        minus_color = C_BTN if self.active_level > 1 else (200, 200, 200)
-        pygame.draw.rect(self.surface, minus_color, minus_rect, border_radius=6)
-        minus_surf = font_lg.render("−", True, C_BTN_TEXT if self.active_level > 1 else C_HINT)
-        self.surface.blit(minus_surf, minus_surf.get_rect(center=minus_rect.center))
-        self._level_minus_rect = minus_rect
-
-        # + button (right third)
-        plus_rect = pygame.Rect(lvl_rect.right - minus_w, lvl_rect.y, minus_w, lvl_h)
-        plus_color = C_BTN if self.active_level < 10 else (200, 200, 200)
-        pygame.draw.rect(self.surface, plus_color, plus_rect, border_radius=6)
-        plus_surf = font_lg.render("+", True, C_BTN_TEXT if self.active_level < 10 else C_HINT)
-        self.surface.blit(plus_surf, plus_surf.get_rect(center=plus_rect.center))
-        self._level_plus_rect = plus_rect
-
-        # Level number (centre)
-        num = font_lg.render(str(self.active_level), True, C_LEVEL_TEXT)
-        self.surface.blit(num, num.get_rect(center=lvl_rect.center))
-
-        y += lvl_h + pad
-
         # ── Status ──
         if self.selected_node is not None:
             status_color = C_STATUS_WAIT
-            lines = ["node selected —", "click another to connect"]
+            lines = ["node selected —", "click node or same-", "type line to connect"]
         else:
             status_color = C_STATUS_OK
             lines = ["click a node to", "start a connection"]
@@ -887,8 +981,6 @@ class GUI:
                 all_conns.append(conn)
         self._cached_all_conns = all_conns
 
-        # Build the same pair_map as _draw_connections so we can
-        # replicate the lateral offset for each parallel connection.
         pair_map: dict[frozenset, list] = {}
         for conn in all_conns:
             key = frozenset([id(conn.nodes[0]), id(conn.nodes[1])])
@@ -905,7 +997,6 @@ class GUI:
             p2 = self._to_screen(conn.nodes[1].position)
             op1, op2 = self._offset_line(p1, p2, offset)
 
-            # Point-to-segment distance instead of point-to-midpoint.
             dx, dy = op2[0] - op1[0], op2[1] - op1[1]
             seg_len_sq = dx * dx + dy * dy
             if seg_len_sq == 0:
@@ -924,6 +1015,180 @@ class GUI:
                 best_idx = i
 
         return best_idx
+
+    def _junction_conn_at(self, nodes: list, screen_pos) -> int | None:
+        """
+        Return the index (into _cached_all_conns) of the nearest connection
+        that matches the currently active connection type AND is within hit
+        radius.  Returns None if no such connection is near the cursor.
+
+        Also stores the snapped world position in self._snap_world_pos and
+        the snapped screen position in self._snap_screen_pos.
+        """
+        self._snap_world_pos = None
+        self._snap_screen_pos = None
+
+        all_conns = getattr(self, '_cached_all_conns', [])
+        if not all_conns:
+            return None
+
+        active_type_name = CONNECTION_TYPES[self.active_type_idx]["name"]
+
+        pair_map: dict[frozenset, list] = {}
+        for conn in all_conns:
+            key = frozenset([id(conn.nodes[0]), id(conn.nodes[1])])
+            pair_map.setdefault(key, []).append(conn)
+
+        best_idx = None
+        best_dist = self._CONNECTION_HIT_RADIUS + 1
+        best_closest_screen = None
+
+        for i, conn in enumerate(all_conns):
+            # Only match connections of the same type as active
+            if conn.type.name != active_type_name:
+                continue
+
+            key = frozenset([id(conn.nodes[0]), id(conn.nodes[1])])
+            siblings = pair_map[key]
+            n = len(siblings)
+            sibling_idx = siblings.index(conn)
+            offset = (sibling_idx - (n - 1) / 2) * CONNECTION_OFFSET * self.zoom
+
+            p1 = self._to_screen(conn.nodes[0].position)
+            p2 = self._to_screen(conn.nodes[1].position)
+            op1, op2 = self._offset_line(p1, p2, offset)
+
+            dx, dy = op2[0] - op1[0], op2[1] - op1[1]
+            seg_len_sq = dx * dx + dy * dy
+            if seg_len_sq == 0:
+                closest = op1
+                dist = math.hypot(screen_pos[0] - op1[0], screen_pos[1] - op1[1])
+            else:
+                t = max(0.0, min(1.0, (
+                    (screen_pos[0] - op1[0]) * dx +
+                    (screen_pos[1] - op1[1]) * dy
+                ) / seg_len_sq))
+                closest = (op1[0] + t * dx, op1[1] + t * dy)
+                dist = math.hypot(screen_pos[0] - closest[0], screen_pos[1] - closest[1])
+
+            if dist < best_dist:
+                best_dist = dist
+                best_idx = i
+                best_closest_screen = closest
+
+        if best_idx is not None:
+            self._snap_screen_pos = (int(best_closest_screen[0]), int(best_closest_screen[1]))
+            self._snap_world_pos = self._screen_to_world(best_closest_screen)
+
+        return best_idx
+
+    # ------------------------------------------------------------------
+    # Junction preview tooltip
+    # ------------------------------------------------------------------
+
+    def _draw_junction_preview_tooltip(self, nodes: list):
+        """
+        Show build cost + upkeep tooltip when the player (with a node selected)
+        hovers over a same-type connection to place a junction.
+        """
+        if self.selected_node is None:
+            return
+        if self.hovered_node is not None:
+            return  # node tooltip takes priority
+        if self.hovered_junction_conn is None:
+            return
+
+        all_conns = getattr(self, '_cached_all_conns', [])
+        if self.hovered_junction_conn >= len(all_conns):
+            return
+
+        snap_world = getattr(self, '_snap_world_pos', None)
+        if snap_world is None:
+            return
+
+        src_node = nodes[self.selected_node]
+
+        # Distance from the selected node to the snap point on the connection
+        dx = snap_world[0] - src_node.position[0]
+        dy = snap_world[1] - src_node.position[1]
+        distance = math.hypot(dx, dy) / 10  # same scale divisor as elsewhere
+
+        ct_name = CONNECTION_TYPES[self.active_type_idx]["name"]
+        level = self.active_level
+        build_cost = self.CONNECTION_COSTS.get(ct_name, 0) * level * distance + JUNCTION_COSTS[ct_name] * all_conns[self.hovered_junction_conn].level
+        monthly_upkeep = self.CONNECTION_UPKEEP_COSTS.get(ct_name, 0) * level * distance
+
+        font_title = _font(22, self.surface, bold=True)
+        font_body = _font(18, self.surface)
+        pad = 10
+        line_h = font_body.get_height()
+
+        title_text = f"Junction on {ct_name}  (Lv.{level})"
+        title_surf = font_title.render(title_text, True, (30, 30, 30))
+
+        rows = [
+            ("Build cost",     f"${build_cost:,.2f}M",               (200, 80, 60)),
+            ("Monthly upkeep", f"-${monthly_upkeep * 1000:,.2f}k / month", (209, 151, 17)),
+        ]
+
+        # Divider row + note
+        note_text = "Creates a junction node"
+        note_surf = font_body.render(note_text, True, (100, 100, 100))
+
+        max_row_w = max(
+            font_body.render(lbl + "  " + val, True, (0, 0, 0)).get_width()
+            for lbl, val, _ in rows
+        )
+        box_w = max(title_surf.get_width(), max_row_w, note_surf.get_width()) + pad * 2
+        box_h = (pad
+                 + font_title.get_height() + 4
+                 + 1 + 6                         # divider
+                 + len(rows) * (line_h + 4)
+                 + 4 + 1 + 6                     # second divider + note
+                 + line_h
+                 + pad)
+
+        # Anchor near the snap point on the connection
+        snap_sp = getattr(self, '_snap_screen_pos', None)
+        if snap_sp:
+            tx = snap_sp[0] + 16
+            ty = snap_sp[1] - box_h // 2
+        else:
+            mx, my = pygame.mouse.get_pos()
+            tx = mx + 16
+            ty = my - box_h // 2
+
+        canvas_w = self.canvas_rect().width
+        sh = self.surface.get_height()
+        if tx + box_w > canvas_w - 4:
+            tx = (snap_sp[0] if snap_sp else mx) - box_w - 16
+        ty = max(4, min(ty, sh - box_h - 4))
+
+        box = pygame.Rect(tx, ty, box_w, box_h)
+        pygame.draw.rect(self.surface, (255, 255, 255), box, border_radius=8)
+        # Amber border to distinguish from the node-to-node tooltip
+        pygame.draw.rect(self.surface, (200, 150, 30), box, width=2, border_radius=8)
+
+        y = ty + pad
+        self.surface.blit(title_surf, (tx + pad, y))
+        y += font_title.get_height() + 4
+
+        pygame.draw.line(self.surface, (200, 200, 200),
+                         (tx + pad, y), (tx + box_w - pad, y), 1)
+        y += 6
+
+        for lbl, val, color in rows:
+            lbl_surf = font_body.render(lbl, True, (80, 80, 80))
+            val_surf = font_body.render(val, True, color)
+            self.surface.blit(lbl_surf, (tx + pad, y))
+            self.surface.blit(val_surf, (tx + box_w - pad - val_surf.get_width(), y))
+            y += line_h + 4
+
+        y += 2
+        pygame.draw.line(self.surface, (220, 220, 220),
+                         (tx + pad, y), (tx + box_w - pad, y), 1)
+        y += 6
+        self.surface.blit(note_surf, note_surf.get_rect(centerx=tx + box_w // 2, y=y))
 
     def _draw_connection_tooltip(self, nodes: list):
         if self.hovered_conn is None:
@@ -957,26 +1222,24 @@ class GUI:
 
         title_text = conn.type.name.capitalize()
 
-        # ── Compute upgrade cost/upkeep for display ──────────────────
         ct_name = conn.type.name
         dx = conn.nodes[1].position[0] - conn.nodes[0].position[0]
         dy = conn.nodes[1].position[1] - conn.nodes[0].position[1]
         distance = math.hypot(dx, dy) / 10
-        upgrade_cost   = self.CONNECTION_COSTS.get(ct_name, 0) * 1 * distance  # cost of +1 level
+        upgrade_cost   = self.CONNECTION_COSTS.get(ct_name, 0) * 1 * distance
         upgrade_upkeep = self.CONNECTION_UPKEEP_COSTS.get(ct_name, 0) * 1 * distance
 
-        # extra rows: upgrade cost, upkeep delta, hint
         upgrade_rows = 2
         hint_rows = 1
 
         box_h = (font_title.get_height() + pad
                  + 6
-                 + (line_h + 2)                        # Level row
-                 + 2 * (line_h + 2 + bar_h + 6)        # People / Goods bars
-                 + 6                                    # divider gap
-                 + upgrade_rows * (line_h + 2)          # upgrade cost rows
-                 + 6                                    # small gap before hint
-                 + hint_line_h + 4                      # "press X to upgrade" hint
+                 + (line_h + 2)
+                 + 2 * (line_h + 2 + bar_h + 6)
+                 + 6
+                 + upgrade_rows * (line_h + 2)
+                 + 6
+                 + hint_line_h + 4
                  + pad)
         box_w = max(200, _scale(230, self.surface))
 
@@ -1026,14 +1289,13 @@ class GUI:
                                  border_radius=2)
             y += bar_h + 6
 
-        # ── Upgrade section ──────────────────────────────────────────
         pygame.draw.line(self.surface, (200, 200, 200),
                          (tx + pad, y), (tx + box_w - pad, y), 1)
         y += 6
 
         upgrade_rows_data = [
             ("Upgrade cost",   f"${upgrade_cost:,.2f}M",              (200, 80, 60)),
-            ("Upkeep delta",   f"+${upgrade_upkeep * 1000:,.3f}k/day", (209, 151, 17)),
+            ("Upkeep delta",   f"+${upgrade_upkeep * 1000:,.3f}k/month", (209, 151, 17)),
         ]
         for label, val, color in upgrade_rows_data:
             lbl_surf = font_body.render(label, True, (80, 80, 80))
@@ -1042,7 +1304,6 @@ class GUI:
             self.surface.blit(val_surf, (tx + box_w - pad - val_surf.get_width(), y))
             y += line_h + 2
 
-        # ── "Press X to upgrade" hint ────────────────────────────────
         y += 4
         hint_surf = font_hint.render("Press  X  to upgrade", True, (70, 130, 220))
         self.surface.blit(hint_surf, hint_surf.get_rect(centerx=tx + box_w // 2, y=y))
@@ -1053,9 +1314,9 @@ class GUI:
         "Highway": 10,
     }
     CONNECTION_UPKEEP_COSTS = {
-        "Passenger Rail": 0.0125,
-        "Freight Rail": 0.05 / 365.0,
-        "Highway": 0.035 / 365.0,
+        "Passenger Rail": (0.0125 * 365) / 12,
+        "Freight Rail": 0.05 / 12,
+        "Highway": 0.035 / 12
     }
 
     def _draw_type_tooltip(self):
@@ -1082,7 +1343,7 @@ class GUI:
             f"People cap: {cap_people}",
             f"Goods cap:  {cap_goods}",
             f"Cost:   ${cost * self.active_level}M / mi",
-            f"Upkeep: ${upkeep * self.active_level * 1000:.4f}k / mi / day",
+            f"Upkeep: ${upkeep * self.active_level * 1000:.2f}k / mi / month",
         ]
 
         title_surf = font_title.render(name, True, (30, 30, 30))
@@ -1091,11 +1352,9 @@ class GUI:
         box_w = max_text_w + pad * 2
         box_h = font_title.get_height() + 4 + 1 + 6 + len(rows) * (line_h + 2) + pad * 2
 
-        # Position: below the hovered button, right-aligned to the panel left edge
         tx = btn_rect.left - box_w - 6
         ty = btn_rect.top
 
-        # Keep on screen vertically
         sh = self.surface.get_height()
         if ty + box_h > sh - 4:
             ty = sh - box_h - 4
@@ -1111,7 +1370,7 @@ class GUI:
                          (tx + pad, y), (tx + box_w - pad, y), 1)
         y += 6
 
-        divider_row = 2  # draw a divider before cost rows
+        divider_row = 2
         for i, row in enumerate(rows):
             if i == divider_row:
                 pygame.draw.line(self.surface, (220, 220, 220),
@@ -1133,8 +1392,6 @@ class GUI:
 
         dx = node_b.position[0] - node_a.position[0]
         dy = node_b.position[1] - node_a.position[1]
-        # Divide by whatever constant maps your world coords → miles/km.
-        # 100 is a reasonable default; tune to match your game's scale.
         distance = math.hypot(dx, dy) / 10
 
         ct_name = CONNECTION_TYPES[self.active_type_idx]["name"]
@@ -1149,7 +1406,7 @@ class GUI:
 
         rows = [
             ("Build cost", f"${build_cost:,.2f}M", (200, 80, 60)),
-            ("Daily upkeep", f"-${daily_upkeep * 1000:,.3f}k / day", (209, 151, 17)),
+            ("Monthly upkeep", f"-${daily_upkeep * 1000:,.2f}k / month", (209, 151, 17)),
         ]
 
         title_text = f"Build {ct_name}  (Lv.{level})"
@@ -1162,11 +1419,10 @@ class GUI:
         box_w = max(title_surf.get_width(), max_row_w) + pad * 2
         box_h = (pad
                  + font_title.get_height() + 4
-                 + 1 + 6  # divider
+                 + 1 + 6
                  + len(rows) * (line_h + 4)
                  + pad)
 
-        # Anchor tooltip near the hovered node, offset so it doesn't cover it.
         sp = self._to_screen(node_b.position)
         node_r = self._node_radius(node_b)
         tx = sp[0] + node_r + 12
@@ -1198,26 +1454,14 @@ class GUI:
             y += line_h + 4
 
     def show_lose_screen(self, days_survived: int):
-        """
-        Render a blocking modal lose screen over the live game canvas.
-
-        The city network remains visible behind a semi-transparent dark overlay.
-
-        Returns:
-            True  – player wants to restart (clicked 'Play Again' or pressed Enter/Space)
-            False – player wants to quit   (closed the window or pressed Escape/Q)
-        """
         sw, sh = self.surface.get_size()
         cx, cy = sw // 2, sh // 2
 
-        # Capture the current frame so the background stays frozen (not live-updating).
         background_snapshot = self.surface.copy()
 
-        # Overlay surface — semi-transparent dark wash over the whole window.
         overlay = pygame.Surface((sw, sh), pygame.SRCALPHA)
-        overlay.fill((10, 14, 22, 190))  # dark navy, ~75% opaque
+        overlay.fill((10, 14, 22, 190))
 
-        # Modal dimensions
         modal_w = min(_scale(420, self.surface, "w"), sw - _scale(60, self.surface, "w"))
         modal_h = _scale(340, self.surface)
         modal_x = cx - modal_w // 2
@@ -1250,51 +1494,39 @@ class GUI:
                     if event.button == 1 and quit_rect.collidepoint(event.pos):
                         return False
 
-            # ── Frozen background + dark wash ────────────────────────────
             self.surface.blit(background_snapshot, (0, 0))
             self.surface.blit(overlay, (0, 0))
 
-            # ── Modal card ────────────────────────────────────────────────
             pad = _scale(24, self.surface)
 
-            # Drop shadow
             shadow_surf = pygame.Surface((modal_w + 16, modal_h + 16), pygame.SRCALPHA)
             shadow_surf.fill((0, 0, 0, 0))
             pygame.draw.rect(shadow_surf, (0, 0, 0, 100),
                              pygame.Rect(8, 8, modal_w, modal_h), border_radius=14)
             self.surface.blit(shadow_surf, (modal_x - 8, modal_y - 8))
 
-            # Card body
             card = pygame.Rect(modal_x, modal_y, modal_w, modal_h)
             pygame.draw.rect(self.surface, (22, 28, 40), card, border_radius=14)
 
-            # Red accent bar at top of card
             accent_bar = pygame.Rect(modal_x, modal_y, modal_w, _scale(5, self.surface))
-            pygame.draw.rect(self.surface, (200, 80, 60), accent_bar,
-                             border_radius=14)  # pygame clips bottom corners automatically
+            pygame.draw.rect(self.surface, (200, 80, 60), accent_bar, border_radius=14)
 
-            # Card border
             pygame.draw.rect(self.surface, (55, 65, 85), card, width=1, border_radius=14)
 
-            # ── Content layout (top-to-bottom inside card) ────────────────
             y = modal_y + _scale(28, self.surface)
 
-            # "GAME OVER"
             heading_surf = font_heading.render("GAME OVER", True, (220, 70, 55))
             self.surface.blit(heading_surf, heading_surf.get_rect(centerx=cx, y=y))
             y += heading_surf.get_height() + _scale(4, self.surface)
 
-            # Thin divider line
             pygame.draw.line(self.surface, (55, 65, 85),
                              (modal_x + pad, y), (modal_x + modal_w - pad, y), 1)
             y += _scale(12, self.surface)
 
-            # Subtitle
             sub_surf = font_sub.render("Your city ran out of funds.", True, (120, 130, 150))
             self.surface.blit(sub_surf, sub_surf.get_rect(centerx=cx, y=y))
             y += sub_surf.get_height() + _scale(18, self.surface)
 
-            # Score pill background
             pill_w = _scale(180, self.surface, "w")
             pill_h = _scale(72, self.surface)
             pill_rect = pygame.Rect(cx - pill_w // 2, y, pill_w, pill_h)
@@ -1310,7 +1542,6 @@ class GUI:
 
             y += pill_h + _scale(22, self.surface)
 
-            # ── Buttons (Play Again + Quit side by side) ──────────────────
             btn_gap = _scale(10, self.surface)
             btn_w = (modal_w - pad * 2 - btn_gap) // 2
             btn_h = _scale(42, self.surface)
@@ -1318,7 +1549,6 @@ class GUI:
             restart_rect = pygame.Rect(modal_x + pad, y, btn_w, btn_h)
             quit_rect = pygame.Rect(modal_x + pad + btn_w + btn_gap, y, btn_w, btn_h)
 
-            # Keep btn_rect pointing at restart for the keyboard shortcut hit-test above.
             btn_rect = restart_rect
 
             restart_hovered = restart_rect.collidepoint(mouse_pos)
@@ -1337,9 +1567,6 @@ class GUI:
             q_label = font_btn.render("QUIT", True, (200, 160, 160))
             self.surface.blit(q_label, q_label.get_rect(center=quit_rect.center))
 
-            # Also handle quit button click (separate from the event loop above)
-
-            # ── Keyboard hint ─────────────────────────────────────────────
             hint_y = modal_y + modal_h + _scale(8, self.surface)
             hint_surf = font_hint.render("Enter / Space — restart   ·   Esc — quit", True, (70, 82, 100))
             self.surface.blit(hint_surf, hint_surf.get_rect(centerx=cx, y=hint_y))
@@ -1364,7 +1591,6 @@ class GUI:
             return
 
         remaining = self._flash_expires - now
-        # Fade out over the final 0.5 s
         alpha_frac = min(1.0, remaining / 0.5)
         a = int(230 * alpha_frac)
 
@@ -1384,7 +1610,6 @@ class GUI:
                          pill_surf.get_rect(), border_radius=10)
         pygame.draw.rect(pill_surf, (220, 85, 65, a),
                          pill_surf.get_rect(), width=1, border_radius=10)
-        # Warning icon rendered as text (✕ or !)
         warn_font = _font(20, self.surface)
         warn_surf = warn_font.render("!", True, (255, 215, 60))
         warn_bg = pygame.Surface((warn_surf.get_width() + 6, warn_surf.get_height() + 2),
@@ -1394,18 +1619,15 @@ class GUI:
         pill_surf.blit(text_surf, (h_pad, v_pad))
         self.surface.blit(pill_surf, (pill_x, pill_y))
 
-        # Shake ring on the source node
         if self._flash_shake_node is not None:
             elapsed = now - self._flash_shake_start
             shake_dur = 0.5
             if elapsed < shake_dur:
-                # Oscillate ring radius
                 t = elapsed / shake_dur
                 ring_r = int(6 + 4 * math.sin(t * math.pi * 6) * (1 - t))
                 ring_a = int(255 * (1 - t) * alpha_frac)
                 ring_color = (220, 80, 60, ring_a)
 
-                # We need the node's screen position — stored from last _draw_nodes call
                 node_sp = getattr(self, '_last_node_positions', {}).get(self._flash_shake_node)
                 if node_sp:
                     ring_surf = pygame.Surface(
