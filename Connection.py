@@ -10,4 +10,5 @@ class Connection:
 
     def upgrade(self):
         self.level += 1
-        self.capacity += self.type.capacity
+        self.capacity = tuple(x * self.level for x in self.type.capacity)
+        self.load = self.capacity

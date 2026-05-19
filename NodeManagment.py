@@ -49,7 +49,9 @@ def generate_node_position(nodes, min_distance=80, search_radius=100):
         return (random.uniform(*BOUNDS), random.uniform(*BOUNDS))
 
     for _ in range(1000):
-        anchor = random.choice(nodes)
+        anchor = nodes[5]
+        while anchor.nodeType.name == "out" or anchor.nodeType.name == "junction":
+            anchor = random.choice(nodes)
         ax, ay = anchor.position
 
         angle = random.uniform(0, 2 * math.pi)
@@ -126,7 +128,7 @@ def addNode(nodes: list[Node]):
 def levelUpNode(nodes: list[Node]):
     capacityVNeeds, levels = calculate_balance(nodes)
 
-    levels = [math.sqrt(1 / x) for x in levels]
+    levels = [math.cbrt(1 / x) for x in levels]
 
     nodesCopy = [x for x in nodes if x.nodeType.name[0] in capacityVNeeds]
 

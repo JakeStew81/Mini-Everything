@@ -7,7 +7,7 @@ NODE_TYPE_COLORS: dict[str, tuple[int, int, int]] = {
     "residential": (8, 196, 24),
     "market": (12, 96, 166),
     "industrial": (209, 151, 17),
-    "out": (0, 0, 0),
+    "out": (150, 150, 150),
     "junction": (100, 100, 100)
 }
 
@@ -253,6 +253,14 @@ class GUI:
 
         self._hovered_type_idx: int | None = None
 
+        # Flash / insufficient-funds feedback
+        import time as _time
+        self._flash_message: str | None = None
+        self._flash_expires: float = 0.0
+        self._flash_shake_node: int | None = None
+        self._flash_shake_start: float = 0.0
+        self._time = _time
+
     # ------------------------------------------------------------------
     # Responsive layout helpers
     # ------------------------------------------------------------------
@@ -282,7 +290,7 @@ class GUI:
         h = self.surface.get_height()
         return pygame.Rect(0, 0, w - self._panel_width(), h)
 
-    def handle_event(self, event, nodes, on_connect):
+    def handle_event(self, event, nodes, on_connect, on_upgrade_connection):
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             pos = event.pos
 
@@ -327,8 +335,20 @@ class GUI:
                     self.selected_node = None
                 else:
                     type_name = CONNECTION_TYPES[self.active_type_idx]["name"]
-                    on_connect(nodes[self.selected_node], nodes[clicked], type_name, self.active_level)
-                    self.selected_node = None
+                    success = on_connect(nodes[self.selected_node], nodes[clicked], type_name, self.active_level)
+                    if not success:
+                        ct_name = CONNECTION_TYPES[self.active_type_idx]["name"]
+                        dx = nodes[clicked].position[0] - nodes[self.selected_node].position[0]
+                        dy = nodes[clicked].position[1] - nodes[self.selected_node].position[1]
+                        dist = math.hypot(dx, dy) / 10
+                        cost = self.CONNECTION_COSTS.get(ct_name, 0) * self.active_level * dist
+                        self.show_flash(
+                            f"Insufficient funds  (need ${cost:,.1f}M)",
+                            shake_node=self.selected_node
+                        )
+                        # keep selected_node so the player can see what failed
+                    else:
+                        self.selected_node = None
 
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 3:
             if self.canvas_rect().collidepoint(event.pos):
@@ -338,6 +358,13 @@ class GUI:
         elif event.type == pygame.KEYDOWN:
             if event.key == pygame.K_ESCAPE:
                 self.selected_node = None
+                return True
+
+            # ── Upgrade hovered connection ─────────────────────────────
+            if event.key == pygame.K_x and self.hovered_conn is not None:
+                all_conns = getattr(self, '_cached_all_conns', [])
+                if self.hovered_conn < len(all_conns):
+                    on_upgrade_connection(all_conns[self.hovered_conn])
                 return True
 
         elif event.type == pygame.MOUSEWHEEL:
@@ -401,11 +428,12 @@ class GUI:
         self._draw_connections(nodes)
         self._draw_preview(nodes)
         self._draw_nodes(nodes)
+        self._draw_flash()
 
         self.surface.set_clip(old_clip)
         self._draw_node_tooltip(nodes)
         self._draw_connection_tooltip(nodes)
-        self._draw_panel(money, moneyPerDay)
+        self._draw_panel(nodes, money, moneyPerDay)
         self._draw_zoom_indicator()
         self._draw_connection_preview_tooltip(nodes)
 
@@ -423,8 +451,6 @@ class GUI:
         if self.hovered_node is None:
             return
         node = nodes[self.hovered_node]
-        print(f"Reg {nodes[1].ratioNeedsMet()}") # works fine
-        print(node.ratioNeedsMet()) # when hovering over the same node that maps to 1, returns (0, 0)
 
         font_title = _font(25, self.surface, bold=True)
         font_body = _font(20, self.surface)
@@ -526,6 +552,7 @@ class GUI:
     def _node_at(self, nodes, screen_pos):
         for i, node in enumerate(nodes):
             sp = self._to_screen(node.position)
+            self._last_node_positions[i] = sp
             radius = self._node_radius(node)
             if math.hypot(screen_pos[0] - sp[0], screen_pos[1] - sp[1]) <= radius + 4:
                 return i
@@ -569,30 +596,41 @@ class GUI:
         return pair_map
 
     def _draw_connections(self, nodes):
-        pair_map   = self._gather_connection_pairs(nodes)
-        drawn_keys = set()
-        for node in nodes:
-            for conn in node.connections:
-                key = frozenset([id(conn.nodes[0]), id(conn.nodes[1])])
-                if key in drawn_keys:
-                    continue
-                drawn_keys.add(key)
-                connections = pair_map[key]
-                n = len(connections)
-                for i, c in enumerate(connections):
-                    offset = (i - (n - 1) / 2) * CONNECTION_OFFSET * self.zoom
-                    p1 = self._to_screen(c.nodes[0].position)
-                    p2 = self._to_screen(c.nodes[1].position)
-                    op1, op2 = self._offset_line(p1, p2, offset)
-                    style = self._connection_style(c.type)
-                    color = style.get("color", (100, 100, 100))
-                    width = max(1, int((BASE_CONNECTION_WIDTH + c.level * CONNECTION_WIDTH_PER_LEVEL) * self.zoom))
-                    dash_len = max(4, int(10 * self.zoom))
-                    if style.get("dash"):
-                        self._draw_dashed_line(color, op1, op2, width,
-                                               style.get("dash") if isinstance(style.get("dash"), int) else dash_len)
-                    else:
-                        pygame.draw.line(self.surface, color, op1, op2, width)
+        pair_map = self._gather_connection_pairs(nodes)
+
+        for key, connections in pair_map.items():
+            n = len(connections)
+            for i, c in enumerate(connections):
+                offset = (i - (n - 1) / 2) * CONNECTION_OFFSET * self.zoom
+                p1 = self._to_screen(c.nodes[0].position)
+                p2 = self._to_screen(c.nodes[1].position)
+                op1, op2 = self._offset_line(p1, p2, offset)
+                style = self._connection_style(c.type)
+                base_color = style.get("color", (100, 100, 100))
+                width = max(1, int((BASE_CONNECTION_WIDTH + c.level * CONNECTION_WIDTH_PER_LEVEL) * self.zoom))
+                dash_len = max(4, int(10 * self.zoom))
+
+                # Tint toward red based on fullness (max of people/goods load ratio)
+                cap_people, cap_goods = c.capacity
+                load_people, load_goods = c.load
+                used_people = cap_people - load_people
+                used_goods = cap_goods - load_goods
+                p_ratio = (used_people / cap_people) if cap_people > 0 else 0.0
+                g_ratio = (used_goods / cap_goods) if cap_goods > 0 else 0.0
+                full_ratio = max(p_ratio, g_ratio)  # 0.0 = empty, 1.0 = full
+                full_ratio = max(0.0, min(1.0, full_ratio))
+                full_ratio = 0 if full_ratio < 0.5 else full_ratio
+
+                # Blend base_color → red by up to 50%
+                red = (200, 80, 60)
+                t = full_ratio  # 0.0 → 0.5
+                color = tuple(int(base_color[j] * (1 - t) + red[j] * t) for j in range(3))
+
+                if style.get("dash"):
+                    self._draw_dashed_line(color, op1, op2, width,
+                                           style.get("dash") if isinstance(style.get("dash"), int) else dash_len)
+                else:
+                    pygame.draw.line(self.surface, color, op1, op2, width)
 
     def _draw_preview(self, nodes):
         if self.selected_node is None:
@@ -603,10 +641,20 @@ class GUI:
         self._draw_dashed_line(C_PREVIEW, p1, p2, 1, 8)
 
     def _draw_nodes(self, nodes):
+        self._last_node_positions = {}
         for i, node in enumerate(nodes):
             sp = self._to_screen(node.position)
             radius = self._node_radius(node)
-            color = self._node_color(node.nodeType)
+            base_color = self._node_color(node.nodeType)
+
+            # Tint darker based on unmet needs (0% unmet = original, 100% unmet = 50% darker)
+            met, total = node.ratioNeedsMet()
+            if total > 0:
+                unmet_ratio = 1.0 - (met / total)  # 0.0 = all met, 1.0 = none met
+            else:
+                unmet_ratio = 0.0
+            dark_factor = 1.0 - (unmet_ratio * 0.5)  # ranges from 1.0 down to 0.5
+            color = tuple(int(c * dark_factor) for c in base_color)
 
             if i == self.selected_node:
                 pygame.draw.circle(self.surface, C_SELECT_RING, sp, radius + 6, 2)
@@ -617,7 +665,7 @@ class GUI:
 
     # --- Panel --------------------------------------------------------
 
-    def _draw_panel(self, money: float, moneyPerDay: float):
+    def _draw_panel(self, nodes, money: float, moneyPerDay: float):
         sw = self.surface.get_width()
         sh = self.surface.get_height()
 
@@ -694,6 +742,52 @@ class GUI:
         self.surface.blit(day_surf, day_surf.get_rect(centerx=pill_rect.centerx,
                                                       y=pill_rect.y + pad // 2 + font_money_val.get_height() + 2))
         y += pill_rect.height + pad
+
+        # ── City needs met bar ─────────────────────────────────────────
+        # Compute aggregate needs met across all nodes
+        total_met = 0.0
+        total_needed = 0.0
+        for node in nodes:
+            m, t = node.ratioNeedsMet()
+            total_met += m
+            total_needed += t
+        needs_pct = int(total_met / total_needed * 100) if total_needed > 0 else 100
+
+        needs_label_surf = font_money_label.render("CITY NEEDS MET", True, C_HINT)
+        self.surface.blit(needs_label_surf,
+                          needs_label_surf.get_rect(centerx=px + pw // 2, y=y))
+        y += needs_label_surf.get_height() + 2
+
+        # Color: green → amber → orange → red
+        if needs_pct >= 80:
+            needs_color = (11, 133, 120)  # teal/green
+        elif needs_pct >= 60:
+            needs_color = (209, 151, 17)  # amber
+        elif needs_pct >= 40:
+            needs_color = (220, 100, 40)  # orange
+        else:
+            needs_color = (200, 80, 60)  # red
+
+        needs_pill_h = font_money_val.get_height() + 10
+        needs_pill_rect = pygame.Rect(x, y, bw, needs_pill_h)
+        pygame.draw.rect(self.surface, C_LEVEL_BG, needs_pill_rect, border_radius=8)
+
+        pct_surf = font_money_val.render(f"{needs_pct}%", True, needs_color)
+        self.surface.blit(pct_surf, pct_surf.get_rect(
+            centerx=needs_pill_rect.centerx,
+            y=needs_pill_rect.y + 4
+        ))
+        y += needs_pill_h + 4
+
+        # Progress bar
+        bar_h_needs = max(6, _scale(8, self.surface))
+        bar_rect_needs = pygame.Rect(x, y, bw, bar_h_needs)
+        pygame.draw.rect(self.surface, (200, 200, 200), bar_rect_needs, border_radius=4)
+        fill_w_needs = int(bw * needs_pct / 100)
+        if fill_w_needs > 0:
+            pygame.draw.rect(self.surface, needs_color,
+                             pygame.Rect(x, y, fill_w_needs, bar_h_needs), border_radius=4)
+        y += bar_h_needs + pad
 
         # Divider before connection controls
         pygame.draw.line(self.surface, C_PANEL_EDGE,
@@ -791,6 +885,7 @@ class GUI:
                     continue
                 seen.add(id(conn))
                 all_conns.append(conn)
+        self._cached_all_conns = all_conns
 
         # Build the same pair_map as _draw_connections so we can
         # replicate the lateral offset for each parallel connection.
@@ -848,9 +943,11 @@ class GUI:
 
         font_title = _font(25, self.surface, bold=True)
         font_body = _font(20, self.surface)
+        font_hint = _font(17, self.surface)
         pad = 10
         bar_h = max(4, _scale(5, self.surface))
         line_h = font_body.get_height()
+        hint_line_h = font_hint.get_height()
 
         cap_people, cap_goods = conn.capacity
         load_people, load_goods = conn.load
@@ -860,12 +957,28 @@ class GUI:
 
         title_text = conn.type.name.capitalize()
 
+        # ── Compute upgrade cost/upkeep for display ──────────────────
+        ct_name = conn.type.name
+        dx = conn.nodes[1].position[0] - conn.nodes[0].position[0]
+        dy = conn.nodes[1].position[1] - conn.nodes[0].position[1]
+        distance = math.hypot(dx, dy) / 10
+        upgrade_cost   = self.CONNECTION_COSTS.get(ct_name, 0) * 1 * distance  # cost of +1 level
+        upgrade_upkeep = self.CONNECTION_UPKEEP_COSTS.get(ct_name, 0) * 1 * distance
+
+        # extra rows: upgrade cost, upkeep delta, hint
+        upgrade_rows = 2
+        hint_rows = 1
+
         box_h = (font_title.get_height() + pad
                  + 6
-                 + (line_h + 2)
-                 + 2 * (line_h + 2 + bar_h + 6)
+                 + (line_h + 2)                        # Level row
+                 + 2 * (line_h + 2 + bar_h + 6)        # People / Goods bars
+                 + 6                                    # divider gap
+                 + upgrade_rows * (line_h + 2)          # upgrade cost rows
+                 + 6                                    # small gap before hint
+                 + hint_line_h + 4                      # "press X to upgrade" hint
                  + pad)
-        box_w = max(180, _scale(210, self.surface))
+        box_w = max(200, _scale(230, self.surface))
 
         mx, my = pygame.mouse.get_pos()
         tx = mx + 14
@@ -896,7 +1009,7 @@ class GUI:
         bar_total_w = box_w - pad * 2
         for label, load, cap in [("People", load_people, cap_people),
                                  ("Goods", load_goods, cap_goods)]:
-            lbl_surf = font_body.render(f"{label}:", True, (60, 60, 60))
+            lbl_surf = font_body.render(f"{label}: {int(load)}/{int(cap)}", True, (60, 60, 60))
             self.surface.blit(lbl_surf, (tx + pad, y))
             y += line_h + 2
 
@@ -913,10 +1026,31 @@ class GUI:
                                  border_radius=2)
             y += bar_h + 6
 
+        # ── Upgrade section ──────────────────────────────────────────
+        pygame.draw.line(self.surface, (200, 200, 200),
+                         (tx + pad, y), (tx + box_w - pad, y), 1)
+        y += 6
+
+        upgrade_rows_data = [
+            ("Upgrade cost",   f"${upgrade_cost:,.2f}M",              (200, 80, 60)),
+            ("Upkeep delta",   f"+${upgrade_upkeep * 1000:,.3f}k/day", (209, 151, 17)),
+        ]
+        for label, val, color in upgrade_rows_data:
+            lbl_surf = font_body.render(label, True, (80, 80, 80))
+            val_surf = font_body.render(val, True, color)
+            self.surface.blit(lbl_surf, (tx + pad, y))
+            self.surface.blit(val_surf, (tx + box_w - pad - val_surf.get_width(), y))
+            y += line_h + 2
+
+        # ── "Press X to upgrade" hint ────────────────────────────────
+        y += 4
+        hint_surf = font_hint.render("Press  X  to upgrade", True, (70, 130, 220))
+        self.surface.blit(hint_surf, hint_surf.get_rect(centerx=tx + box_w // 2, y=y))
+
     CONNECTION_COSTS = {
         "Passenger Rail": 75,
-        "Freight Rail": 35,
-        "Highway": 6,
+        "Freight Rail": 15,
+        "Highway": 10,
     }
     CONNECTION_UPKEEP_COSTS = {
         "Passenger Rail": 0.0125,
@@ -1062,3 +1196,222 @@ class GUI:
             self.surface.blit(lbl_surf, (tx + pad, y))
             self.surface.blit(val_surf, (tx + box_w - pad - val_surf.get_width(), y))
             y += line_h + 4
+
+    def show_lose_screen(self, days_survived: int):
+        """
+        Render a blocking modal lose screen over the live game canvas.
+
+        The city network remains visible behind a semi-transparent dark overlay.
+
+        Returns:
+            True  – player wants to restart (clicked 'Play Again' or pressed Enter/Space)
+            False – player wants to quit   (closed the window or pressed Escape/Q)
+        """
+        sw, sh = self.surface.get_size()
+        cx, cy = sw // 2, sh // 2
+
+        # Capture the current frame so the background stays frozen (not live-updating).
+        background_snapshot = self.surface.copy()
+
+        # Overlay surface — semi-transparent dark wash over the whole window.
+        overlay = pygame.Surface((sw, sh), pygame.SRCALPHA)
+        overlay.fill((10, 14, 22, 190))  # dark navy, ~75% opaque
+
+        # Modal dimensions
+        modal_w = min(_scale(420, self.surface, "w"), sw - _scale(60, self.surface, "w"))
+        modal_h = _scale(340, self.surface)
+        modal_x = cx - modal_w // 2
+        modal_y = cy - modal_h // 2
+
+        font_heading = _font(72, self.surface, bold=True)
+        font_sub = _font(24, self.surface)
+        font_score = _font(44, self.surface, bold=True)
+        font_score_lbl = _font(18, self.surface)
+        font_btn = _font(24, self.surface, bold=True)
+        font_hint = _font(14, self.surface)
+
+        clock = pygame.time.Clock()
+
+        while True:
+            clock.tick(10)
+            mouse_pos = pygame.mouse.get_pos()
+
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    return False
+                if event.type == pygame.KEYDOWN:
+                    if event.key in (pygame.K_RETURN, pygame.K_SPACE):
+                        return True
+                    if event.key in (pygame.K_ESCAPE, pygame.K_q):
+                        return False
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    if btn_rect.collidepoint(event.pos):
+                        return True
+                    if event.button == 1 and quit_rect.collidepoint(event.pos):
+                        return False
+
+            # ── Frozen background + dark wash ────────────────────────────
+            self.surface.blit(background_snapshot, (0, 0))
+            self.surface.blit(overlay, (0, 0))
+
+            # ── Modal card ────────────────────────────────────────────────
+            pad = _scale(24, self.surface)
+
+            # Drop shadow
+            shadow_surf = pygame.Surface((modal_w + 16, modal_h + 16), pygame.SRCALPHA)
+            shadow_surf.fill((0, 0, 0, 0))
+            pygame.draw.rect(shadow_surf, (0, 0, 0, 100),
+                             pygame.Rect(8, 8, modal_w, modal_h), border_radius=14)
+            self.surface.blit(shadow_surf, (modal_x - 8, modal_y - 8))
+
+            # Card body
+            card = pygame.Rect(modal_x, modal_y, modal_w, modal_h)
+            pygame.draw.rect(self.surface, (22, 28, 40), card, border_radius=14)
+
+            # Red accent bar at top of card
+            accent_bar = pygame.Rect(modal_x, modal_y, modal_w, _scale(5, self.surface))
+            pygame.draw.rect(self.surface, (200, 80, 60), accent_bar,
+                             border_radius=14)  # pygame clips bottom corners automatically
+
+            # Card border
+            pygame.draw.rect(self.surface, (55, 65, 85), card, width=1, border_radius=14)
+
+            # ── Content layout (top-to-bottom inside card) ────────────────
+            y = modal_y + _scale(28, self.surface)
+
+            # "GAME OVER"
+            heading_surf = font_heading.render("GAME OVER", True, (220, 70, 55))
+            self.surface.blit(heading_surf, heading_surf.get_rect(centerx=cx, y=y))
+            y += heading_surf.get_height() + _scale(4, self.surface)
+
+            # Thin divider line
+            pygame.draw.line(self.surface, (55, 65, 85),
+                             (modal_x + pad, y), (modal_x + modal_w - pad, y), 1)
+            y += _scale(12, self.surface)
+
+            # Subtitle
+            sub_surf = font_sub.render("Your city ran out of funds.", True, (120, 130, 150))
+            self.surface.blit(sub_surf, sub_surf.get_rect(centerx=cx, y=y))
+            y += sub_surf.get_height() + _scale(18, self.surface)
+
+            # Score pill background
+            pill_w = _scale(180, self.surface, "w")
+            pill_h = _scale(72, self.surface)
+            pill_rect = pygame.Rect(cx - pill_w // 2, y, pill_w, pill_h)
+            pygame.draw.rect(self.surface, (30, 38, 55), pill_rect, border_radius=10)
+            pygame.draw.rect(self.surface, (55, 65, 85), pill_rect, width=1, border_radius=10)
+
+            lbl_surf = font_score_lbl.render("DAYS SURVIVED", True, (90, 105, 130))
+            self.surface.blit(lbl_surf, lbl_surf.get_rect(centerx=cx, y=pill_rect.y + _scale(8, self.surface)))
+
+            score_surf = font_score.render(str(days_survived), True, (220, 225, 235))
+            self.surface.blit(score_surf, score_surf.get_rect(
+                centerx=cx, y=pill_rect.y + lbl_surf.get_height() + _scale(8, self.surface)))
+
+            y += pill_h + _scale(22, self.surface)
+
+            # ── Buttons (Play Again + Quit side by side) ──────────────────
+            btn_gap = _scale(10, self.surface)
+            btn_w = (modal_w - pad * 2 - btn_gap) // 2
+            btn_h = _scale(42, self.surface)
+
+            restart_rect = pygame.Rect(modal_x + pad, y, btn_w, btn_h)
+            quit_rect = pygame.Rect(modal_x + pad + btn_w + btn_gap, y, btn_w, btn_h)
+
+            # Keep btn_rect pointing at restart for the keyboard shortcut hit-test above.
+            btn_rect = restart_rect
+
+            restart_hovered = restart_rect.collidepoint(mouse_pos)
+            quit_hovered = quit_rect.collidepoint(mouse_pos)
+
+            restart_color = (14, 170, 153) if restart_hovered else (11, 133, 120)
+            quit_color = (75, 55, 55) if quit_hovered else (55, 40, 40)
+
+            pygame.draw.rect(self.surface, restart_color, restart_rect, border_radius=8)
+            pygame.draw.rect(self.surface, (11, 133, 120), restart_rect, width=1, border_radius=8)
+            r_label = font_btn.render("PLAY AGAIN", True, (255, 255, 255))
+            self.surface.blit(r_label, r_label.get_rect(center=restart_rect.center))
+
+            pygame.draw.rect(self.surface, quit_color, quit_rect, border_radius=8)
+            pygame.draw.rect(self.surface, (90, 60, 60), quit_rect, width=1, border_radius=8)
+            q_label = font_btn.render("QUIT", True, (200, 160, 160))
+            self.surface.blit(q_label, q_label.get_rect(center=quit_rect.center))
+
+            # Also handle quit button click (separate from the event loop above)
+
+            # ── Keyboard hint ─────────────────────────────────────────────
+            hint_y = modal_y + modal_h + _scale(8, self.surface)
+            hint_surf = font_hint.render("Enter / Space — restart   ·   Esc — quit", True, (70, 82, 100))
+            self.surface.blit(hint_surf, hint_surf.get_rect(centerx=cx, y=hint_y))
+
+            pygame.display.flip()
+
+    def show_flash(self, message: str, shake_node: int | None = None):
+        """Show a timed error pill on the canvas. Optionally wobble a node."""
+        self._flash_message = message
+        self._flash_expires = self._time.monotonic() + 2.5
+        self._flash_shake_node = shake_node
+        self._flash_shake_start = self._time.monotonic()
+
+    def _draw_flash(self):
+        """Render error flash pill and node shake ring. Called each frame from update()."""
+        if self._flash_message is None:
+            return
+        now = self._time.monotonic()
+        if now >= self._flash_expires:
+            self._flash_message = None
+            self._flash_shake_node = None
+            return
+
+        remaining = self._flash_expires - now
+        # Fade out over the final 0.5 s
+        alpha_frac = min(1.0, remaining / 0.5)
+        a = int(230 * alpha_frac)
+
+        font = _font(20, self.surface, bold=True)
+        text_surf = font.render(self._flash_message, True, (255, 255, 255))
+
+        h_pad, v_pad = 16, 10
+        pill_w = text_surf.get_width() + h_pad * 2
+        pill_h = text_surf.get_height() + v_pad * 2
+
+        canvas = self.canvas_rect()
+        pill_x = canvas.left + (canvas.width - pill_w) // 2
+        pill_y = _scale(20, self.surface)
+
+        pill_surf = pygame.Surface((pill_w, pill_h), pygame.SRCALPHA)
+        pygame.draw.rect(pill_surf, (170, 45, 35, a),
+                         pill_surf.get_rect(), border_radius=10)
+        pygame.draw.rect(pill_surf, (220, 85, 65, a),
+                         pill_surf.get_rect(), width=1, border_radius=10)
+        # Warning icon rendered as text (✕ or !)
+        warn_font = _font(20, self.surface)
+        warn_surf = warn_font.render("!", True, (255, 215, 60))
+        warn_bg = pygame.Surface((warn_surf.get_width() + 6, warn_surf.get_height() + 2),
+                                 pygame.SRCALPHA)
+        warn_bg.blit(warn_surf, (3, 1))
+        pill_surf.blit(warn_bg, (h_pad - warn_bg.get_width(), v_pad))
+        pill_surf.blit(text_surf, (h_pad, v_pad))
+        self.surface.blit(pill_surf, (pill_x, pill_y))
+
+        # Shake ring on the source node
+        if self._flash_shake_node is not None:
+            elapsed = now - self._flash_shake_start
+            shake_dur = 0.5
+            if elapsed < shake_dur:
+                # Oscillate ring radius
+                t = elapsed / shake_dur
+                ring_r = int(6 + 4 * math.sin(t * math.pi * 6) * (1 - t))
+                ring_a = int(255 * (1 - t) * alpha_frac)
+                ring_color = (220, 80, 60, ring_a)
+
+                # We need the node's screen position — stored from last _draw_nodes call
+                node_sp = getattr(self, '_last_node_positions', {}).get(self._flash_shake_node)
+                if node_sp:
+                    ring_surf = pygame.Surface(
+                        (ring_r * 2 + 4, ring_r * 2 + 4), pygame.SRCALPHA)
+                    pygame.draw.circle(ring_surf, ring_color,
+                                       (ring_r + 2, ring_r + 2), ring_r, 2)
+                    self.surface.blit(ring_surf,
+                                      (node_sp[0] - ring_r - 2,
+                                       node_sp[1] - ring_r - 2))

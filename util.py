@@ -27,7 +27,7 @@ nodeTypes = {
     "junction": NodeType("junction", "Junction",
                          {"c": (0, 0), "r": (0, 0), "m": (0, 0), "i": (0, 0), "o": (0, 0)},
                          (9999,9999)),
-    "out": NodeType("Outside of City", "Out",
+    "out": NodeType("out", "Out of City",
                     {"c": (0, 0), "r": (0, 0), "m": (0, 0), "i": (0, 0), "o": (0, 0)},
                     (9999, 9999)),
 }  # TODO: Fill out properly with good values & stuff. Temp values for testing rn.
@@ -35,7 +35,7 @@ nodeTypes = {
     # The values are 9999 because idk what they should be, and it seems like you want to do the balance so like -.- you know?
 
 connectionTypes = {
-    "Highway": ConnectionType("Highway", (2, 2)), #45k passengers/day, 156k tons/day
+    "Highway": ConnectionType("Highway", (3, 2)), #45k passengers/day, 156k tons/day
     "Freight Rail": ConnectionType("Freight Rail", (0, 20)), #1.5m tons/day
     "Passenger Rail": ConnectionType("Passenger Rail", (25, 0)) # 480k passengers/day
 } # TODO: Fill out properly with good values & stuff. Temp values for testing rn.
