@@ -83,7 +83,7 @@ class Node:
     def levelUp(self, amount):
         self.level += amount
         self.needs = {key: [x * self.level for x in val] for key, val in self.nodeType.needs.items()}
-        self.supply = self.supply * self.level
+        self.supply = tuple(x * self.level for x in self.nodeType.max_supply)
 
     def ratioNeedsMet(self):
         return self._needsMet # temp, return tuple with (met needs, total needs)

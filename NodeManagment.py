@@ -46,7 +46,7 @@ def calculate_balance(nodes: list[Node]):
 
 def generate_node_position(nodes, min_distance=80, search_radius=100):
     if not nodes:
-        return (random.uniform(*BOUNDS), random.uniform(*BOUNDS))
+        return random.uniform(*BOUNDS), random.uniform(*BOUNDS)
 
     for _ in range(1000):
         anchor = nodes[5]
@@ -128,7 +128,7 @@ def addNode(nodes: list[Node]):
 def levelUpNode(nodes: list[Node]):
     capacityVNeeds, levels = calculate_balance(nodes)
 
-    levels = [math.cbrt(1 / x) for x in levels]
+    levels = [math.sqrt(1/(x-0.6)) for x in levels]
 
     nodesCopy = [x for x in nodes if x.nodeType.name[0] in capacityVNeeds]
 

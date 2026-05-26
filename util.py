@@ -23,7 +23,7 @@ nodeTypes = {
                        (10, 9999)),
     "industry": NodeType("industrial", "Industrial",
                          {"c": (0, 0), "r": (2, 0), "m": (0, 0), "i": (0, 0), "o": (0, 2)},
-                         (4,9999)),
+                         (2,9999)),
     "junction": NodeType("junction", "Junction",
                          {"c": (0, 0), "r": (0, 0), "m": (0, 0), "i": (0, 0), "o": (0, 0)},
                          (9999,9999)),

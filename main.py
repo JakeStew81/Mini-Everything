@@ -8,17 +8,12 @@ import numpy as np
 import copy, math
 
 GAME_TICK = pygame.event.custom_type()
-MONEY_SCALAR = 0.08
+MONEY_SCALAR = 0.2
 
-NEW_NODE_COOLDOWN_MIN = 20
-NEW_NODE_COOLDOWN_STEP = 100
-NEW_NODE_ODDS_MAX = 0.90
-NEW_NODE_ODDS_STEP = 0.1
-
-LEVEL_UP_COOLDOWN_MIN = 20
-LEVEL_UP_COOLDOWN_STEP = 100
-LEVEL_UP_ODDS_MAX = 0.75
-LEVEL_UP_ODDS_STEP = 0.15
+NODE_ADVANCEMENT_ODDS = 0.00075
+NODE_ADVANCEMENT_COOLDOWN_STEP = 50
+NEW_NODE_ODDS = 0.4
+LEVEL_UP_ODDS = 1 - NEW_NODE_ODDS
 
 CONNECTION_COSTS = { # $million per mile per level
     "Passenger Rail": 75,
@@ -26,10 +21,22 @@ CONNECTION_COSTS = { # $million per mile per level
     "Highway": 10
 }
 
-CONNECTION_UPKEEP_COSTS = { # $million per mile per day per level
-    "Passenger Rail": 0.0125,
-    "Freight Rail": 0.05 / 365.0,
-    "Highway": 0.035 / 365.0
+JUNCTION_COSTS = { # $million per level
+    "Passenger Rail": 15,
+    "Freight Rail": 0.25,
+    "Highway": 6
+}
+
+CONNECTION_UPKEEP_COSTS = { # $million per mile per month per level
+    "Passenger Rail": (0.000003 * 10 * 24 * 365) / 12,
+    "Freight Rail": 0.05 / 12,
+    "Highway": 0.035 / 12
+}
+
+CONNECTION_UPGRADE_LIMITS = {
+    "Highway": 6,
+    "Passenger Rail": 3,
+    "Freight Rail": 3,
 }
 
 PIXELS_PER_MILE = 10
@@ -50,7 +57,7 @@ class Game:
         out_conn = Connection([self.nodes[0], self.nodes[7]], util.connectionTypes["Highway"], 6)
         self.nodes[0].connections.append(out_conn)
         self.nodes[7].connections.append(out_conn)
-        self.money = math.inf # 650
+        self.money = math.inf # 750
         self.moneyPerTick = 0
         self.newNodeTimer = 0
         self.levelUpTimer = 0
@@ -61,11 +68,9 @@ class Game:
         self.tick_skip_count = 0
         self.gameOver = False
         self.loseScreen = False
-        self.days = 0
-        self.new_node_cooldown = 500
-        self.new_node_odds = 0.1
-        self.level_up_cooldown = 400
-        self.level_up_odds = 0.15
+        self.months = 0
+        self.node_advancement_cooldown = 200
+        self.node_advancement_timer = 0
 
     def loop(self):
         for event in pygame.event.get():
@@ -76,7 +81,7 @@ class Game:
             if not self.title.started:
                 self.title.handle_event(event)
             else:
-                self.gui.handle_event(event, self.nodes, self._add_connection, self._upgrade_connection)
+                self.gui.handle_event(event, self.nodes, self._add_connection, self._upgrade_connection, self._add_junction)
 
             if self.gui is None and self.title.started:
                 self.gui = GUI.GUI(self.surface)
@@ -126,9 +131,10 @@ class Game:
 
         metDemands, totalDemands = zip(*satisfied_demand)
 
-        demand_mult = (((sum(metDemands) / sum(totalDemands)) ** 1.25) - 0.5)
+        demand_mult = ((sum(metDemands) / sum(totalDemands)) - 0.45)
         print(demand_mult)
-        totalDemand = np.sum(totalDemands) + 10
+        totalDemand = np.sum(totalDemands) + 40
+        totalDemand = totalDemand ** (2/3)
 
         connections = []
         for node in self.nodes:
@@ -141,36 +147,34 @@ class Game:
             operatingCost += (CONNECTION_UPKEEP_COSTS[connection.type.name] * connection.level
                             * self.calculate_connection_length(connection))
 
-        self.moneyPerTick = (totalDemand * demand_mult * MONEY_SCALAR) - operatingCost
+        self.moneyPerTick = (totalDemand * demand_mult * MONEY_SCALAR) - (operatingCost * (sum(metDemands) / sum(totalDemands)))
         self.money += self.moneyPerTick
 
-        self.newNodeTimer += 1
-        if self.newNodeTimer > self.new_node_cooldown and random.random() <= self.new_node_odds:
-            addNode(self.nodes)
-            self.newNodeTimer = 0
-            if self.new_node_cooldown > NEW_NODE_COOLDOWN_MIN:
-                self.new_node_cooldown -= NEW_NODE_COOLDOWN_STEP
-            if self.new_node_odds > NEW_NODE_ODDS_MAX:
-                self.new_node_odds += NEW_NODE_ODDS_STEP
+        for node in self.nodes:
+            if node.nodeType.name == "out" or node.nodeType.name == "junction":
+                continue
 
-        self.levelUpTimer += 1
-        if self.levelUpTimer > self.level_up_cooldown and random.random() <= self.level_up_odds:
-            levelUpNode(self.nodes)
-            self.levelUpTimer = 0
-            if self.level_up_cooldown > LEVEL_UP_COOLDOWN_MIN:
-                self.level_up_cooldown -= LEVEL_UP_COOLDOWN_STEP
-            if self.level_up_odds > LEVEL_UP_ODDS_MAX:
-                self.level_up_odds += LEVEL_UP_ODDS_STEP
+            if random.random() <= NODE_ADVANCEMENT_ODDS and self.node_advancement_timer <= 0:
+                self.node_advancement_cooldown -= NODE_ADVANCEMENT_COOLDOWN_STEP if self.node_advancement_cooldown > 50 else 50
+                self.node_advancement_timer = self.node_advancement_cooldown
+                if random.random() <= NEW_NODE_ODDS:
+                    addNode(self.nodes)
+                    break
+                else:
+                    levelUpNode(self.nodes)
+                    break
+
+        self.node_advancement_timer -= 1
 
         if self.money <= 0:
             self.loseScreen = True
-            res = self.gui.show_lose_screen(self.days)
+            res = self.gui.show_lose_screen(self.months)
             if res:
                 self.gameOver = True
             else:
                 pygame.quit()
 
-        self.days += 1
+        self.months += 1
 
     def _add_connection(self, node_a, node_b, type_name, level):
         conn = Connection([node_a, node_b], util.connectionTypes[type_name], level)
@@ -184,13 +188,14 @@ class Game:
                     mut.connections.append(conn)
                 elif mut.position == node_b.position:
                     mut.connections.append(conn)
+            print("conn added")
             return True
         else:
             return False
 
     def _upgrade_connection(self, conn):
         cost = self.calculate_connection_length(conn) * CONNECTION_COSTS[conn.type.name]
-        if cost <= self.money:
+        if cost <= self.money and conn.level < CONNECTION_UPGRADE_LIMITS[conn.type.name]:
             self.money -= cost
             conn.upgrade()
             found = False
@@ -202,8 +207,39 @@ class Game:
                         break
                 if found:
                     break
+            return ""
+        elif cost > self.money:
+            return "Insufficient Funds"
+        else:
+            return "Max Level Reached"
+
+    def _add_junction(self, pos: tuple[int, int], conn_type: str, from_node: Node, hovered_conn: Connection):
+        junction = Node(util.nodeTypes["junction"], pos)
+        conn = Connection([from_node, junction], util.connectionTypes[conn_type], 1)
+        cost = self.calculate_connection_length(conn) * CONNECTION_COSTS[conn_type] + JUNCTION_COSTS[conn.type.name] * hovered_conn.level
+        print("ON JUNCTION")
+        if cost <= self.money:
+            self.money -= cost
+            from_node.connections.append(conn)
+            junction.connections.append(conn)
+            self.nodes.append(junction)
+
+            hovered_conn.nodes[0].connections.remove(hovered_conn)
+            hovered_conn.nodes[1].connections.remove(hovered_conn)
+
+            firstLeg = Connection([hovered_conn.nodes[0], junction], hovered_conn.type, hovered_conn.level)
+            secondLeg = Connection([junction, hovered_conn.nodes[1]], hovered_conn.type, hovered_conn.level)
+
+            hovered_conn.nodes[0].connections.append(firstLeg)
+            hovered_conn.nodes[1].connections.append(secondLeg)
+            junction.connections.append(firstLeg)
+            junction.connections.append(secondLeg)
+
+            print("Called junction!!")
+
             return True
         else:
+            print(cost)
             return False
 
 if __name__ == "__main__":
