@@ -28,7 +28,7 @@ JUNCTION_COSTS = { # $million per level
 }
 
 CONNECTION_UPKEEP_COSTS = { # $million per mile per month per level
-    "Passenger Rail": ((0.000003) * 10 * 24 * 365) / 12, # operating cost - ticket revenue
+    "Passenger Rail": ((0.000002) * 10 * 24 * 365) / 12, # operating cost - ticket revenue
     "Freight Rail": 0.05 / 12,
     "Highway": 0.035 / 12
 }

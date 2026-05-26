@@ -851,21 +851,24 @@ class GUI:
         if length == 0:
             return p1, p2
         px, py = -dy / length * offset, dx / length * offset
-        return (p1[0] + px, p1[1] + py), (p2[0] + px, p2[1] + py)
+        return (round(p1[0] + px), round(p1[1] + py)), (round(p2[0] + px), round(p2[1] + py))
 
     def _gather_connection_pairs(self, nodes):
         pair_map: dict[tuple, list] = {}
         seen = set()
+        # Collect all connections in a stable order first
+        all_conns = []
         for node in nodes:
             for conn in node.connections:
                 if id(conn) in seen:
                     continue
                 seen.add(id(conn))
-                key = tuple(sorted([id(conn.nodes[0]), id(conn.nodes[1])]))
-                pair_map.setdefault(key, []).append(conn)
-        # Sort siblings by type name for a stable, consistent draw order every frame
-        for key in pair_map:
-            pair_map[key].sort(key=lambda c: c.type.name)
+                all_conns.append(conn)
+        # Sort ALL connections globally by type name so grouping order is deterministic
+        all_conns.sort(key=lambda c: c.type.name)
+        for conn in all_conns:
+            key = tuple(sorted([id(conn.nodes[0]), id(conn.nodes[1])]))
+            pair_map.setdefault(key, []).append(conn)
         return pair_map
 
     def _draw_connections(self, nodes):
@@ -875,11 +878,20 @@ class GUI:
 
         for key, connections in pair_map.items():
             n = len(connections)
+
+            # In _draw_connections, before the inner loop:
+            max_width = max(
+                max(1, int((BASE_CONNECTION_WIDTH + c.level * CONNECTION_WIDTH_PER_LEVEL) * self.zoom))
+                for c in connections
+            )
+
+            std_node_order = (self._to_screen(connections[0].nodes[0].position), self._to_screen(connections[0].nodes[1].position))
+
             for i, c in enumerate(connections):
-                offset = (i - (n - 1) / 2) * CONNECTION_OFFSET * self.zoom
-                p1 = self._to_screen(c.nodes[0].position)
-                p2 = self._to_screen(c.nodes[1].position)
-                op1, op2 = self._offset_line(p1, p2, offset)
+                offset = (i - (n - 1) / 2) * (CONNECTION_OFFSET + max_width) * self.zoom
+                print(offset)
+                op1, op2 = self._offset_line(std_node_order[0], std_node_order[1], offset)
+                print(op1, op2)
                 style = self._connection_style(c.type)
                 base_color = style.get("color", (100, 100, 100))
                 width = max(1, int((BASE_CONNECTION_WIDTH + c.level * CONNECTION_WIDTH_PER_LEVEL) * self.zoom))
@@ -1169,7 +1181,11 @@ class GUI:
             siblings = pair_map[key]
             n = len(siblings)
             sibling_idx = siblings.index(conn)
-            offset = (sibling_idx - (n - 1) / 2) * CONNECTION_OFFSET * self.zoom
+            max_width = max(
+                max(1, int((BASE_CONNECTION_WIDTH + s.level * CONNECTION_WIDTH_PER_LEVEL) * self.zoom))
+                for s in siblings
+            )
+            offset = (sibling_idx - (n - 1) / 2) * (CONNECTION_OFFSET + max_width) * self.zoom
 
             p1 = self._to_screen(conn.nodes[0].position)
             p2 = self._to_screen(conn.nodes[1].position)
@@ -1232,7 +1248,11 @@ class GUI:
             siblings = pair_map[key]
             n = len(siblings)
             sibling_idx = siblings.index(conn)
-            offset = (sibling_idx - (n - 1) / 2) * CONNECTION_OFFSET * self.zoom
+            max_width = max(
+                max(1, int((BASE_CONNECTION_WIDTH + s.level * CONNECTION_WIDTH_PER_LEVEL) * self.zoom))
+                for s in siblings
+            )
+            offset = (sibling_idx - (n - 1) / 2) * (CONNECTION_OFFSET + max_width) * self.zoom
 
             p1 = self._to_screen(conn.nodes[0].position)
             p2 = self._to_screen(conn.nodes[1].position)
@@ -1494,7 +1514,7 @@ class GUI:
         "Highway": 10,
     }
     CONNECTION_UPKEEP_COSTS = {  # $million per mile per month per level
-        "Passenger Rail": (0.000003 * 10 * 24 * 365) / 12,
+        "Passenger Rail": ((0.0000015) * 10 * 24 * 365) / 12,
         "Freight Rail": 0.05 / 12,
         "Highway": 0.035 / 12
     }
