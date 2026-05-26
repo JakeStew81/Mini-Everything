@@ -764,7 +764,9 @@ class GUI:
                 if id(conn) in seen:
                     continue
                 seen.add(id(conn))
-                key = frozenset([id(conn.nodes[0]), id(conn.nodes[1])])
+                # Use positions instead of object identity so deep-copied
+                # nodes group correctly with all their parallel connections
+                key = frozenset([conn.nodes[0].position, conn.nodes[1].position])
                 pair_map.setdefault(key, []).append(conn)
         return pair_map
 
@@ -1064,11 +1066,11 @@ class GUI:
         # replicate the lateral offset for each parallel connection.
         pair_map: dict[frozenset, list] = {}
         for conn in all_conns:
-            key = frozenset([id(conn.nodes[0]), id(conn.nodes[1])])
+            key = frozenset([conn.nodes[0].position, conn.nodes[1].position])
             pair_map.setdefault(key, []).append(conn)
 
         for i, conn in enumerate(all_conns):
-            key = frozenset([id(conn.nodes[0]), id(conn.nodes[1])])
+            key = frozenset([conn.nodes[0].position, conn.nodes[1].position])  # ← match pair_map
             siblings = pair_map[key]
             n = len(siblings)
             sibling_idx = siblings.index(conn)
