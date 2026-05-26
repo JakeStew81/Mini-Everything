@@ -57,7 +57,7 @@ class Game:
         out_conn = Connection([self.nodes[0], self.nodes[7]], util.connectionTypes["Highway"], 6)
         self.nodes[0].connections.append(out_conn)
         self.nodes[7].connections.append(out_conn)
-        self.money = 750
+        self.money = math.inf # 750
         self.moneyPerTick = 0
         self.newNodeTimer = 0
         self.levelUpTimer = 0
@@ -100,6 +100,19 @@ class Game:
         if not self.title.started:
             self.title.update()
         else:
+            if self.gui is not None and self.gui.paused:
+                for real, mut in zip(self.nodes, self.mut_nodes):
+                    mut.level = real.level
+                    mut.nodeType = real.nodeType
+                    mut_conn_pairs = {
+                        (c.nodes[0].position, c.nodes[1].position) for c in mut.connections
+                    }
+                    for conn in real.connections:
+                        pair = (conn.nodes[0].position, conn.nodes[1].position)
+                        pair_rev = (conn.nodes[1].position, conn.nodes[0].position)
+                        if pair not in mut_conn_pairs and pair_rev not in mut_conn_pairs:
+                            mut.connections.append(conn)
+
             self.gui.update(self.mut_nodes, self.money, self.moneyPerTick)
 
         pygame.display.flip()
@@ -170,6 +183,11 @@ class Game:
             self.money -= cost
             node_a.connections.append(conn)
             node_b.connections.append(conn)
+            for mut in self.mut_nodes:
+                if mut.position == node_a.position:
+                    mut.connections.append(conn)
+                elif mut.position == node_b.position:
+                    mut.connections.append(conn)
             print("conn added")
             return True
         else:
@@ -180,6 +198,15 @@ class Game:
         if cost <= self.money and conn.level < CONNECTION_UPGRADE_LIMITS[conn.type.name]:
             self.money -= cost
             conn.upgrade()
+            found = False
+            for mut in self.mut_nodes:
+                for mut_conn in mut.connections:
+                    if (mut_conn.nodes[0].position == conn.nodes[0].position and mut_conn.nodes[1].position == conn.nodes[1].position and mut_conn.type.name == conn.type.name):
+                        mut_conn.upgrade()
+                        found = True
+                        break
+                if found:
+                    break
             return ""
         elif cost > self.money:
             return "Insufficient Funds"
