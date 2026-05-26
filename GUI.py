@@ -492,7 +492,7 @@ class GUI:
         # We need the sibling count to replicate the offset, but since this is
         # called after _gather_connection_pairs we can compute it on the fly.
         pair_map = self._gather_connection_pairs_cached()
-        key = frozenset([id(conn.nodes[0]), id(conn.nodes[1])])
+        key = tuple(sorted([id(conn.nodes[0]), id(conn.nodes[1])]))
         siblings = pair_map.get(key, [conn])
         n = len(siblings)
         try:
@@ -854,17 +854,18 @@ class GUI:
         return (p1[0] + px, p1[1] + py), (p2[0] + px, p2[1] + py)
 
     def _gather_connection_pairs(self, nodes):
-        pair_map: dict[frozenset, list] = {}
+        pair_map: dict[tuple, list] = {}
         seen = set()
         for node in nodes:
             for conn in node.connections:
                 if id(conn) in seen:
                     continue
                 seen.add(id(conn))
-                # Use positions instead of object identity so deep-copied
-                # nodes group correctly with all their parallel connections
-                key = frozenset([conn.nodes[0].position, conn.nodes[1].position])
+                key = tuple(sorted([id(conn.nodes[0]), id(conn.nodes[1])]))
                 pair_map.setdefault(key, []).append(conn)
+        # Sort siblings by type name for a stable, consistent draw order every frame
+        for key in pair_map:
+            pair_map[key].sort(key=lambda c: c.type.name)
         return pair_map
 
     def _draw_connections(self, nodes):
@@ -1156,13 +1157,15 @@ class GUI:
                 all_conns.append(conn)
         self._cached_all_conns = all_conns
 
-        pair_map: dict[frozenset, list] = {}
+        pair_map: dict[tuple, list] = {}
         for conn in all_conns:
-            key = frozenset([conn.nodes[0].position, conn.nodes[1].position])
+            key = tuple(sorted([id(conn.nodes[0]), id(conn.nodes[1])]))
             pair_map.setdefault(key, []).append(conn)
+        for key in pair_map:
+            pair_map[key].sort(key=lambda c: c.type.name)
 
         for i, conn in enumerate(all_conns):
-            key = frozenset([conn.nodes[0].position, conn.nodes[1].position])  # ← match pair_map
+            key = tuple(sorted([id(conn.nodes[0]), id(conn.nodes[1])]))
             siblings = pair_map[key]
             n = len(siblings)
             sibling_idx = siblings.index(conn)
@@ -1209,10 +1212,12 @@ class GUI:
 
         active_type_name = CONNECTION_TYPES[self.active_type_idx]["name"]
 
-        pair_map: dict[frozenset, list] = {}
+        pair_map: dict[tuple, list] = {}
         for conn in all_conns:
-            key = frozenset([id(conn.nodes[0]), id(conn.nodes[1])])
+            key = tuple(sorted([id(conn.nodes[0]), id(conn.nodes[1])]))
             pair_map.setdefault(key, []).append(conn)
+        for key in pair_map:
+            pair_map[key].sort(key=lambda c: c.type.name)
 
         best_idx = None
         best_dist = self._CONNECTION_HIT_RADIUS + 1
@@ -1223,7 +1228,7 @@ class GUI:
             if conn.type.name != active_type_name:
                 continue
 
-            key = frozenset([id(conn.nodes[0]), id(conn.nodes[1])])
+            key = tuple(sorted([id(conn.nodes[0]), id(conn.nodes[1])]))
             siblings = pair_map[key]
             n = len(siblings)
             sibling_idx = siblings.index(conn)
@@ -1469,8 +1474,8 @@ class GUI:
         y += 6
 
         upgrade_rows_data = [
-            ("Upgrade cost",   f"${upgrade_cost:,.2f}M",              (200, 80, 60)),
-            ("Upkeep delta",   f"+${upgrade_upkeep * 1000:,.3f}k/month", (209, 151, 17)),
+            ("Upgrade Cost:",   f"${upgrade_cost:,.2f}M",              (200, 80, 60)),
+            ("Upkeep:",   f"-${upgrade_upkeep * 1000:,.2f}k/month", (209, 151, 17)),
         ]
         for label, val, color in upgrade_rows_data:
             lbl_surf = font_body.render(label, True, (80, 80, 80))

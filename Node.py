@@ -38,7 +38,7 @@ class Node:
                                         if connection.load[0] > 0:
                                             path_connections.append(connection)
                                     if self.needs[destination][1] > 0:
-                                        if connection.load[0] > 0:
+                                        if connection.load[1] > 0:
                                             path_connections.append(connection)
                                     break
                         if self.needs[destination][0] > 0:

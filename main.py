@@ -28,7 +28,7 @@ JUNCTION_COSTS = { # $million per level
 }
 
 CONNECTION_UPKEEP_COSTS = { # $million per mile per month per level
-    "Passenger Rail": (0.000003 * 10 * 24 * 365) / 12,
+    "Passenger Rail": ((0.000003) * 10 * 24 * 365) / 12, # operating cost - ticket revenue
     "Freight Rail": 0.05 / 12,
     "Highway": 0.035 / 12
 }
@@ -54,7 +54,7 @@ class Game:
             Node(util.nodeTypes["out"], (0, 450)),
             Node(util.nodeTypes["out"], (0, -450)),
         ]
-        out_conn = Connection([self.nodes[0], self.nodes[7]], util.connectionTypes["Highway"], 6)
+        out_conn = Connection([self.nodes[0], self.nodes[7]], util.connectionTypes["Highway"], 4)
         self.nodes[0].connections.append(out_conn)
         self.nodes[7].connections.append(out_conn)
         self.money = math.inf # 750
@@ -132,7 +132,6 @@ class Game:
         metDemands, totalDemands = zip(*satisfied_demand)
 
         demand_mult = ((sum(metDemands) / sum(totalDemands)) - 0.45)
-        print(demand_mult)
         totalDemand = np.sum(totalDemands) + 40
         totalDemand = totalDemand ** (3/4)
 
@@ -198,15 +197,6 @@ class Game:
         if cost <= self.money and conn.level < CONNECTION_UPGRADE_LIMITS[conn.type.name]:
             self.money -= cost
             conn.upgrade()
-            found = False
-            for mut in self.mut_nodes:
-                for mut_conn in mut.connections:
-                    if (mut_conn.nodes[0].position == conn.nodes[0].position and mut_conn.nodes[1].position == conn.nodes[1].position and mut_conn.type.name == conn.type.name):
-                        mut_conn.upgrade()
-                        found = True
-                        break
-                if found:
-                    break
             return ""
         elif cost > self.money:
             return "Insufficient Funds"
