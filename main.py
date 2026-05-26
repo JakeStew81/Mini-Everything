@@ -8,11 +8,11 @@ import numpy as np
 import copy, math
 
 GAME_TICK = pygame.event.custom_type()
-MONEY_SCALAR = 0.2
+MONEY_SCALAR = 0.18
 
 NODE_ADVANCEMENT_ODDS = 0.00075
-NODE_ADVANCEMENT_COOLDOWN_STEP = 50
-NEW_NODE_ODDS = 0.4
+NODE_ADVANCEMENT_COOLDOWN_STEP = 25
+NEW_NODE_ODDS = 0.3
 LEVEL_UP_ODDS = 1 - NEW_NODE_ODDS
 
 CONNECTION_COSTS = { # $million per mile per level
@@ -34,7 +34,7 @@ CONNECTION_UPKEEP_COSTS = { # $million per mile per month per level
 }
 
 CONNECTION_UPGRADE_LIMITS = {
-    "Highway": 6,
+    "Highway": 4,
     "Passenger Rail": 3,
     "Freight Rail": 3,
 }
@@ -69,7 +69,7 @@ class Game:
         self.gameOver = False
         self.loseScreen = False
         self.months = 0
-        self.node_advancement_cooldown = 200
+        self.node_advancement_cooldown = 300
         self.node_advancement_timer = 0
 
     def loop(self):
@@ -121,7 +121,7 @@ class Game:
         demand_mult = ((sum(metDemands) / sum(totalDemands)) - 0.45)
         print(demand_mult)
         totalDemand = np.sum(totalDemands) + 40
-        totalDemand = totalDemand ** (2/3)
+        totalDemand = totalDemand ** (3/4)
 
         connections = []
         for node in self.nodes:
@@ -142,7 +142,7 @@ class Game:
                 continue
 
             if random.random() <= NODE_ADVANCEMENT_ODDS and self.node_advancement_timer <= 0:
-                self.node_advancement_cooldown -= NODE_ADVANCEMENT_COOLDOWN_STEP if self.node_advancement_cooldown > 50 else 50
+                self.node_advancement_cooldown -= NODE_ADVANCEMENT_COOLDOWN_STEP if self.node_advancement_cooldown > 150 else 150
                 self.node_advancement_timer = self.node_advancement_cooldown
                 if random.random() <= NEW_NODE_ODDS:
                     addNode(self.nodes)

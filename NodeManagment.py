@@ -128,7 +128,7 @@ def addNode(nodes: list[Node]):
 def levelUpNode(nodes: list[Node]):
     capacityVNeeds, levels = calculate_balance(nodes)
 
-    levels = [math.sqrt(1/(x-0.6)) for x in levels]
+    levels = [math.cbrt(1/(x-0.6)) for x in levels]
 
     nodesCopy = [x for x in nodes if x.nodeType.name[0] in capacityVNeeds]
 
