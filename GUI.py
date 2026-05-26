@@ -1646,7 +1646,35 @@ class GUI:
             self.surface.blit(val_surf, (tx + box_w - pad - val_surf.get_width(), y))
             y += line_h + 4
 
-    def show_lose_screen(self, days_survived: int):
+    def show_lose_screen(
+        self,
+        transported: tuple[int, int],
+        total_upkeep: float,
+        total_earned: float,
+        network_miles: list[float, float, float],
+    ):
+        """
+        transported    : (total_people, total_goods) carried over the entire game.
+        total_upkeep   : cumulative upkeep paid in $M.
+        total_earned   : cumulative revenue earned in $M.
+        network_miles  : (highway_miles, passenger_rail_miles, freight_rail_miles).
+        Returns True to restart, False to quit.
+        """
+        total_people, total_goods               = transported
+        hwy_miles, pr_miles, fr_miles           = network_miles
+
+        # ── Helpers ────────────────────────────────────────────────────
+        def fmt_money(m: float) -> str:
+            """Format a $M value compactly: k suffix under $1 M, B suffix over $1 000 M."""
+            if abs(m) < 1:
+                return f"${m * 1000:,.0f}k"
+            if abs(m) >= 1000:
+                return f"${m / 1000:,.2f}B"
+            return f"${m:,.2f}M"
+
+        def fmt_miles(mi: float) -> str:
+            return f"{mi:,.1f} mi"
+
         sw, sh = self.surface.get_size()
         cx, cy = sw // 2, sh // 2
 
@@ -1655,22 +1683,28 @@ class GUI:
         overlay = pygame.Surface((sw, sh), pygame.SRCALPHA)
         overlay.fill((10, 14, 22, 190))
 
-        modal_w = min(_scale(420, self.surface, "w"), sw - _scale(60, self.surface, "w"))
-        modal_h = _scale(340, self.surface)
+        # Card is wider and taller to fit the extra rows
+        modal_w = min(_scale(560, self.surface, "w"), sw - _scale(40, self.surface, "w"))
+        modal_h = _scale(580, self.surface)
         modal_x = cx - modal_w // 2
         modal_y = cy - modal_h // 2
 
-        font_heading = _font(72, self.surface, bold=True)
-        font_sub = _font(24, self.surface)
-        font_score = _font(44, self.surface, bold=True)
-        font_score_lbl = _font(18, self.surface)
-        font_btn = _font(24, self.surface, bold=True)
-        font_hint = _font(14, self.surface)
+        font_heading  = _font(72, self.surface, bold=True)
+        font_sub      = _font(24, self.surface)
+        font_stat_val = _font(34, self.surface, bold=True)
+        font_stat_lbl = _font(15, self.surface)
+        font_row_lbl  = _font(18, self.surface)
+        font_row_val  = _font(18, self.surface, bold=True)
+        font_sec      = _font(15, self.surface)
+        font_btn      = _font(24, self.surface, bold=True)
+        font_hint     = _font(14, self.surface)
 
-        clock = pygame.time.Clock()
+        clock     = pygame.time.Clock()
+        btn_rect  = pygame.Rect(0, 0, 0, 0)
+        quit_rect = pygame.Rect(0, 0, 0, 0)
 
         while True:
-            clock.tick(10)
+            clock.tick(30)
             mouse_pos = pygame.mouse.get_pos()
 
             for event in pygame.event.get():
@@ -1684,84 +1718,156 @@ class GUI:
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     if btn_rect.collidepoint(event.pos):
                         return True
-                    if event.button == 1 and quit_rect.collidepoint(event.pos):
+                    if quit_rect.collidepoint(event.pos):
                         return False
 
+            # ── Background ──────────────────────────────────────────────
             self.surface.blit(background_snapshot, (0, 0))
             self.surface.blit(overlay, (0, 0))
 
-            pad = _scale(24, self.surface)
+            pad = _scale(22, self.surface)
+            gap = _scale(8,  self.surface)
 
+            # Drop shadow
             shadow_surf = pygame.Surface((modal_w + 16, modal_h + 16), pygame.SRCALPHA)
             shadow_surf.fill((0, 0, 0, 0))
             pygame.draw.rect(shadow_surf, (0, 0, 0, 100),
                              pygame.Rect(8, 8, modal_w, modal_h), border_radius=14)
             self.surface.blit(shadow_surf, (modal_x - 8, modal_y - 8))
 
+            # Card body
             card = pygame.Rect(modal_x, modal_y, modal_w, modal_h)
             pygame.draw.rect(self.surface, (22, 28, 40), card, border_radius=14)
-
             accent_bar = pygame.Rect(modal_x, modal_y, modal_w, _scale(5, self.surface))
             pygame.draw.rect(self.surface, (200, 80, 60), accent_bar, border_radius=14)
-
             pygame.draw.rect(self.surface, (55, 65, 85), card, width=1, border_radius=14)
 
-            y = modal_y + _scale(28, self.surface)
+            y = modal_y + _scale(26, self.surface)
 
+            # ── Heading ─────────────────────────────────────────────────
             heading_surf = font_heading.render("GAME OVER", True, (220, 70, 55))
             self.surface.blit(heading_surf, heading_surf.get_rect(centerx=cx, y=y))
             y += heading_surf.get_height() + _scale(4, self.surface)
 
             pygame.draw.line(self.surface, (55, 65, 85),
                              (modal_x + pad, y), (modal_x + modal_w - pad, y), 1)
-            y += _scale(12, self.surface)
+            y += _scale(10, self.surface)
 
             sub_surf = font_sub.render("Your city ran out of funds.", True, (120, 130, 150))
             self.surface.blit(sub_surf, sub_surf.get_rect(centerx=cx, y=y))
-            y += sub_surf.get_height() + _scale(18, self.surface)
+            y += sub_surf.get_height() + _scale(12, self.surface)
 
-            pill_w = _scale(180, self.surface, "w")
-            pill_h = _scale(72, self.surface)
-            pill_rect = pygame.Rect(cx - pill_w // 2, y, pill_w, pill_h)
-            pygame.draw.rect(self.surface, (30, 38, 55), pill_rect, border_radius=10)
-            pygame.draw.rect(self.surface, (55, 65, 85), pill_rect, width=1, border_radius=10)
+            # ── Section helper ───────────────────────────────────────────
+            def section_label(text: str, yy: int) -> int:
+                lbl = font_sec.render(text.upper(), True, (70, 85, 110))
+                self.surface.blit(lbl, (modal_x + pad, yy))
+                return yy + lbl.get_height() + _scale(4, self.surface)
 
-            lbl_surf = font_score_lbl.render("DAYS SURVIVED", True, (90, 105, 130))
-            self.surface.blit(lbl_surf, lbl_surf.get_rect(centerx=cx, y=pill_rect.y + _scale(8, self.surface)))
+            def draw_pill_row(pills, yy: int, pill_h: int) -> int:
+                """Draw a horizontal row of stat pills. pills = list of (label, value, accent_color)."""
+                n       = len(pills)
+                total_gap = gap * (n - 1)
+                pw      = (modal_w - pad * 2 - total_gap) // n
+                for k, (lbl_text, val_text, accent) in enumerate(pills):
+                    px_ = modal_x + pad + k * (pw + gap)
+                    pr  = pygame.Rect(px_, yy, pw, pill_h)
+                    pygame.draw.rect(self.surface, (30, 38, 55), pr, border_radius=10)
+                    tb  = pygame.Rect(pr.x, pr.y, pr.width, _scale(3, self.surface))
+                    pygame.draw.rect(self.surface, accent, tb, border_radius=10)
+                    pygame.draw.rect(self.surface, (55, 65, 85), pr, width=1, border_radius=10)
 
-            score_surf = font_score.render(str(days_survived), True, (220, 225, 235))
-            self.surface.blit(score_surf, score_surf.get_rect(
-                centerx=cx, y=pill_rect.y + lbl_surf.get_height() + _scale(8, self.surface)))
+                    ls  = font_stat_lbl.render(lbl_text, True, (90, 105, 130))
+                    self.surface.blit(ls, ls.get_rect(
+                        centerx=pr.centerx, y=pr.y + _scale(8, self.surface)))
 
-            y += pill_h + _scale(22, self.surface)
+                    vs  = font_stat_val.render(val_text, True, accent)
+                    self.surface.blit(vs, vs.get_rect(
+                        centerx=pr.centerx,
+                        y=pr.y + ls.get_height() + _scale(10, self.surface)))
+                return yy + pill_h + _scale(10, self.surface)
 
+            def draw_kv_row(rows, yy: int) -> int:
+                """Draw a list of (label, value, value_color) as plain key-value lines."""
+                for lbl_text, val_text, val_color in rows:
+                    ls = font_row_lbl.render(lbl_text, True, (110, 125, 150))
+                    vs = font_row_val.render(val_text, True, val_color)
+                    self.surface.blit(ls, (modal_x + pad, yy))
+                    self.surface.blit(vs, vs.get_rect(right=modal_x + modal_w - pad, y=yy))
+                    yy += ls.get_height() + _scale(3, self.surface)
+                return yy
+
+            def format_number(n: float) -> str:
+                suffixes = [
+                    (1_000_000_000_000, 'T'),
+                    (1_000_000_000, 'B'),
+                    (1_000_000, 'M'),
+                    (1_000, 'k'),
+                ]
+                for threshold, suffix in suffixes:
+                    if abs(n) >= threshold:
+                        value = n / threshold
+                        formatted = f"{value:.2f}".rstrip('0').rstrip('.')
+                        return f"{formatted}{suffix}"
+                return str(n)
+            # ── 1. Transport stats (2 pills) ─────────────────────────────
+            y = section_label("Transport", y)
+            small_pill_h = _scale(68, self.surface)
+            y = draw_pill_row([
+                ("PASSENGERS SERVICED", format_number(total_people) + " Passengers", (11, 133, 120)),
+                ("GOODS SHIPPED", format_number(total_goods) + " Tons",  (209, 151, 17)),
+            ], y, small_pill_h)
+
+            # ── 2. Finances ──────────────────────────────────────────────
+            y = section_label("Finances", y)
+            net = total_earned - total_upkeep
+            net_color = (11, 133, 120) if net >= 0 else (200, 80, 60)
+            y = draw_kv_row([
+                ("Total revenue",  fmt_money(total_earned), (11, 133, 120)),
+                ("Total upkeep",  f"-{fmt_money(total_upkeep)}", (200, 80, 60)),
+                ("Net",            fmt_money(net),           net_color),
+            ], y)
+            y += _scale(10, self.surface)
+
+            # ── 3. Network (3 pills) ─────────────────────────────────────
+            y = section_label("Network built", y)
+            y = draw_pill_row([
+                ("HIGHWAY",        fmt_miles(hwy_miles), (80,  80,  80)),
+                ("PASS. RAIL",     fmt_miles(pr_miles),  (173,  9, 232)),
+                ("FREIGHT RAIL",   fmt_miles(fr_miles),  (122, 82,  13)),
+            ], y, small_pill_h)
+
+            # ── Divider ──────────────────────────────────────────────────
+            pygame.draw.line(self.surface, (40, 50, 68),
+                             (modal_x + pad, y), (modal_x + modal_w - pad, y), 1)
+            y += _scale(10, self.surface)
+
+            # ── Action buttons ───────────────────────────────────────────
             btn_gap = _scale(10, self.surface)
-            btn_w = (modal_w - pad * 2 - btn_gap) // 2
-            btn_h = _scale(42, self.surface)
+            btn_w   = (modal_w - pad * 2 - btn_gap) // 2
+            btn_h_  = _scale(42, self.surface)
 
-            restart_rect = pygame.Rect(modal_x + pad, y, btn_w, btn_h)
-            quit_rect = pygame.Rect(modal_x + pad + btn_w + btn_gap, y, btn_w, btn_h)
+            btn_rect  = pygame.Rect(modal_x + pad, y, btn_w, btn_h_)
+            quit_rect = pygame.Rect(modal_x + pad + btn_w + btn_gap, y, btn_w, btn_h_)
 
-            btn_rect = restart_rect
+            restart_color = (14, 170, 153) if btn_rect.collidepoint(mouse_pos)  else (11, 133, 120)
+            quit_color    = (75, 55, 55)   if quit_rect.collidepoint(mouse_pos) else (55, 40, 40)
 
-            restart_hovered = restart_rect.collidepoint(mouse_pos)
-            quit_hovered = quit_rect.collidepoint(mouse_pos)
+            pygame.draw.rect(self.surface, restart_color, btn_rect,  border_radius=8)
+            pygame.draw.rect(self.surface, (11, 133, 120), btn_rect, width=1, border_radius=8)
+            self.surface.blit(
+                font_btn.render("PLAY AGAIN", True, (255, 255, 255)),
+                font_btn.render("PLAY AGAIN", True, (255, 255, 255)).get_rect(center=btn_rect.center))
 
-            restart_color = (14, 170, 153) if restart_hovered else (11, 133, 120)
-            quit_color = (75, 55, 55) if quit_hovered else (55, 40, 40)
-
-            pygame.draw.rect(self.surface, restart_color, restart_rect, border_radius=8)
-            pygame.draw.rect(self.surface, (11, 133, 120), restart_rect, width=1, border_radius=8)
-            r_label = font_btn.render("PLAY AGAIN", True, (255, 255, 255))
-            self.surface.blit(r_label, r_label.get_rect(center=restart_rect.center))
-
-            pygame.draw.rect(self.surface, quit_color, quit_rect, border_radius=8)
+            pygame.draw.rect(self.surface, quit_color,   quit_rect, border_radius=8)
             pygame.draw.rect(self.surface, (90, 60, 60), quit_rect, width=1, border_radius=8)
-            q_label = font_btn.render("QUIT", True, (200, 160, 160))
-            self.surface.blit(q_label, q_label.get_rect(center=quit_rect.center))
+            self.surface.blit(
+                font_btn.render("QUIT", True, (200, 160, 160)),
+                font_btn.render("QUIT", True, (200, 160, 160)).get_rect(center=quit_rect.center))
 
-            hint_y = modal_y + modal_h + _scale(8, self.surface)
-            hint_surf = font_hint.render("Enter / Space — restart   ·   Esc — quit", True, (70, 82, 100))
+            # Hint below the card
+            hint_y    = modal_y + modal_h + _scale(8, self.surface)
+            hint_surf = font_hint.render(
+                "Enter / Space — restart   ·   Esc — quit", True, (70, 82, 100))
             self.surface.blit(hint_surf, hint_surf.get_rect(centerx=cx, y=hint_y))
 
             pygame.display.flip()

@@ -39,6 +39,8 @@ CONNECTION_UPGRADE_LIMITS = {
     "Freight Rail": 3,
 }
 
+TRUE_TRANSPORT_MULTS = (1, 3)
+
 PIXELS_PER_MILE = 10
 
 class Game:
@@ -71,6 +73,10 @@ class Game:
         self.months = 0
         self.node_advancement_cooldown = 350
         self.node_advancement_timer = self.node_advancement_cooldown
+        self.overall_transported = (0, 0)
+        self.overall_upkeep = 0
+        self.overall_earned = 0
+        self.overall_built = [0, 0, 0]
 
     def loop(self):
         for event in pygame.event.get():
@@ -117,6 +123,20 @@ class Game:
 
         pygame.display.flip()
 
+    def sum_connection_loads(self, mut_nodes) -> tuple:
+        seen = set()
+        total_load = (0, 0)
+
+        for node in mut_nodes:
+            for conn in node.connections:
+                conn_id = id(conn)
+                true_load = (conn.capacity[0] - conn.load[0], conn.capacity[1] - conn.load[1])
+                if conn_id not in seen:
+                    seen.add(conn_id)
+                    total_load = (total_load[0] + true_load[0], total_load[1] + true_load[1])
+
+        return total_load
+
     def calculate_connection_length(self, conn):
         return math.dist(conn.nodes[0].position, conn.nodes[1].position) / PIXELS_PER_MILE
 
@@ -146,7 +166,12 @@ class Game:
             operatingCost += (CONNECTION_UPKEEP_COSTS[connection.type.name] * connection.level
                             * self.calculate_connection_length(connection))
 
+        self.overall_upkeep += operatingCost
+
+        self.overall_transported = tuple(map(sum, zip(self.overall_transported, self.sum_connection_loads(mut_nodes))))
+
         self.moneyPerTick = (totalDemand * demand_mult * MONEY_SCALAR) - (operatingCost * (sum(metDemands) / sum(totalDemands)))
+        self.overall_earned += self.moneyPerTick if self.moneyPerTick > 0 else 0
         self.money += self.moneyPerTick
 
         for node in self.nodes:
@@ -167,7 +192,8 @@ class Game:
 
         if self.money <= 0:
             self.loseScreen = True
-            res = self.gui.show_lose_screen(self.months)
+            self.overall_transported = (self.overall_transported[0] * TRUE_TRANSPORT_MULTS[0], self.overall_transported[1] * TRUE_TRANSPORT_MULTS[1])
+            res = self.gui.show_lose_screen(self.overall_transported, self.overall_upkeep, self.overall_earned, self.overall_built)
             if res:
                 self.gameOver = True
             else:
@@ -178,6 +204,7 @@ class Game:
     def _add_connection(self, node_a, node_b, type_name, level):
         conn = Connection([node_a, node_b], util.connectionTypes[type_name], level)
         cost = self.calculate_connection_length(conn) * CONNECTION_COSTS[type_name] * level
+        self.overall_built[list(CONNECTION_UPGRADE_LIMITS).index(type_name)] += self.calculate_connection_length(conn)
         if cost <= self.money:
             self.money -= cost
             node_a.connections.append(conn)
@@ -236,7 +263,7 @@ if __name__ == "__main__":
     game = Game()
 
     gameTickEvent = pygame.event.Event(GAME_TICK)
-    pygame.time.set_timer(gameTickEvent, 10)
+    pygame.time.set_timer(gameTickEvent, 5)
     while True:
         game.loop()
         if game.gameOver:
