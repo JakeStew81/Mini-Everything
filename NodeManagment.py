@@ -44,12 +44,27 @@ def calculate_balance(nodes: list[Node]):
     return capacityVNeeds, levels
 
 
+def point_to_segment_distance(px, py, ax, ay, bx, by):
+    """Calculate minimum distance from point (px,py) to line segment (ax,ay)-(bx,by)."""
+    dx, dy = bx - ax, by - ay
+    if dx == 0 and dy == 0:
+        return math.hypot(px - ax, py - ay)
+
+    t = max(0, min(1, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)))
+    closest_x = ax + t * dx
+    closest_y = ay + t * dy
+    return math.hypot(px - closest_x, py - closest_y)
+
+
 def generate_node_position(nodes, min_distance=80, search_radius=100):
     if not nodes:
         return random.uniform(*BOUNDS), random.uniform(*BOUNDS)
 
+    # Gather all unique connections from nodes
+    all_connections = {id(c): c for n in nodes for c in n.connections}.values()
+
     for _ in range(1000):
-        anchor = nodes[5]
+        anchor = random.choice(nodes)
         while anchor.nodeType.name == "out" or anchor.nodeType.name == "junction":
             anchor = random.choice(nodes)
         ax, ay = anchor.position
@@ -62,7 +77,17 @@ def generate_node_position(nodes, min_distance=80, search_radius=100):
         if not (BOUNDS[0] <= x <= BOUNDS[1] and BOUNDS[0] <= y <= BOUNDS[1]):
             continue
 
-        if all(math.hypot(x - n.position[0], y - n.position[1]) >= min_distance for n in nodes):
+        if not all(math.hypot(x - n.position[0], y - n.position[1]) >= min_distance for n in nodes):
+            continue
+
+        if all(
+            point_to_segment_distance(
+                x, y,
+                c.nodes[0].position[0], c.nodes[0].position[1],
+                c.nodes[1].position[0], c.nodes[1].position[1]
+            ) >= min_distance
+            for c in all_connections
+        ):
             return (x, y)
 
     return None

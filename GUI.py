@@ -663,13 +663,6 @@ class GUI:
                 if self.hovered_node is None:
                     # Standard connection hover (for inspection tooltip / X-upgrade)
                     self.hovered_conn = self._connection_at(nodes, event.pos)
-
-                    # Junction hover: only active when a node is selected.
-                    # Find the nearest same-type connection within hit radius.
-                    if self.selected_node is not None:
-                        self.hovered_junction_conn = self._junction_conn_at(nodes, event.pos)
-                    else:
-                        self.hovered_junction_conn = None
                 else:
                     self.hovered_conn = None
                     self.hovered_junction_conn = None
@@ -889,9 +882,7 @@ class GUI:
 
             for i, c in enumerate(connections):
                 offset = (i - (n - 1) / 2) * (CONNECTION_OFFSET + max_width) * self.zoom
-                print(offset)
                 op1, op2 = self._offset_line(std_node_order[0], std_node_order[1], offset)
-                print(op1, op2)
                 style = self._connection_style(c.type)
                 base_color = style.get("color", (100, 100, 100))
                 width = max(1, int((BASE_CONNECTION_WIDTH + c.level * CONNECTION_WIDTH_PER_LEVEL) * self.zoom))
@@ -1187,8 +1178,10 @@ class GUI:
             )
             offset = (sibling_idx - (n - 1) / 2) * (CONNECTION_OFFSET + max_width) * self.zoom
 
-            p1 = self._to_screen(conn.nodes[0].position)
-            p2 = self._to_screen(conn.nodes[1].position)
+            # ── Use siblings[0]'s node order as the canonical orientation,
+            #    matching _draw_connections. ──────────────────────────────
+            p1 = self._to_screen(siblings[0].nodes[0].position)
+            p2 = self._to_screen(siblings[0].nodes[1].position)
             op1, op2 = self._offset_line(p1, p2, offset)
 
             dx, dy = op2[0] - op1[0], op2[1] - op1[1]

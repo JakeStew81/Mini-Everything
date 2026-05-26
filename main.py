@@ -10,9 +10,9 @@ import copy, math
 GAME_TICK = pygame.event.custom_type()
 MONEY_SCALAR = 0.18
 
-NODE_ADVANCEMENT_ODDS = 0.00075
-NODE_ADVANCEMENT_COOLDOWN_STEP = 25
-NEW_NODE_ODDS = 0.0 # .3
+NODE_ADVANCEMENT_ODDS = 0.0011
+NODE_ADVANCEMENT_COOLDOWN_STEP = 32
+NEW_NODE_ODDS = 0.3
 LEVEL_UP_ODDS = 1 - NEW_NODE_ODDS
 
 CONNECTION_COSTS = { # $million per mile per level
@@ -57,7 +57,7 @@ class Game:
         out_conn = Connection([self.nodes[0], self.nodes[7]], util.connectionTypes["Highway"], 4)
         self.nodes[0].connections.append(out_conn)
         self.nodes[7].connections.append(out_conn)
-        self.money = math.inf # 750
+        self.money = 750
         self.moneyPerTick = 0
         self.newNodeTimer = 0
         self.levelUpTimer = 0
@@ -69,8 +69,8 @@ class Game:
         self.gameOver = False
         self.loseScreen = False
         self.months = 0
-        self.node_advancement_cooldown = 300
-        self.node_advancement_timer = 0
+        self.node_advancement_cooldown = 350
+        self.node_advancement_timer = self.node_advancement_cooldown
 
     def loop(self):
         for event in pygame.event.get():
@@ -132,7 +132,7 @@ class Game:
         metDemands, totalDemands = zip(*satisfied_demand)
 
         demand_mult = ((sum(metDemands) / sum(totalDemands)) - 0.45)
-        totalDemand = np.sum(totalDemands) + 40
+        totalDemand = np.sum(totalDemands) + 10
         totalDemand = totalDemand ** (3/4)
 
         connections = []
@@ -153,7 +153,7 @@ class Game:
             if node.nodeType.name == "out" or node.nodeType.name == "junction":
                 continue
 
-            if random.random() <= NODE_ADVANCEMENT_ODDS and self.node_advancement_timer <= 0:
+            if random.random() <= (NODE_ADVANCEMENT_ODDS *  (1 / (len(self.nodes) ** (1/4)))) and self.node_advancement_timer <= 0:
                 self.node_advancement_cooldown -= NODE_ADVANCEMENT_COOLDOWN_STEP if self.node_advancement_cooldown > 150 else 150
                 self.node_advancement_timer = self.node_advancement_cooldown
                 if random.random() <= NEW_NODE_ODDS:
