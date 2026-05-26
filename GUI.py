@@ -72,6 +72,40 @@ C_START_BTN_TEXT   = (255, 255, 255)
 
 SPEED_STEPS = [1, 2, 3, 4]
 
+# ── Tutorial text ────────────────────────────────────────────────────────────
+# Edit the lines below to customise the tutorial shown on the title screen.
+# Use "\n" to start a new paragraph. Each entry in the list becomes a section.
+TUTORIAL_SECTIONS: list[tuple[str, str]] = [
+    (
+        "Welcome to Mini Transit!",
+        "Build a transit network connecting your city's districts together.\n"
+        "Your goal is to keep the city funded by satisfying demand "
+        "if you go bankrupt then your game is over!"
+    ),
+    (
+        "Making Connections",
+        "Select a node, then click another to draw a connection between them.\n"
+        "Use the panel on the right to choose the connection type and upgrade level.\n"
+        "there are three connection types highways, passenger rail, and freight rail.\n"
+        "base highways can transport 3 people and 2 goods per day, base passenger rail can transport 25 people per day, base freight rail can transport 20 goods per day.\n"
+        "you can level up your connections by hovering over it and pressing x, each level up increase the load of the connection, by one base level of goods."
+    ),
+    (
+        "Node Types",
+        "Center — the city hub (teal).\n"
+        "Residential — where people live (green).\n"
+        "Commercial / Market — where people shop (blue).\n"
+        "Industrial — freight and goods (amber).\n"
+        "Out of City — external connections (grey)."
+    ),
+    (
+        "Playback Controls",
+        "Use the Pause/Play button to start and stop time.\n"
+        "The Speed button cycles through 1×, 2×, 3× and 4× simulation speed.\n"
+        "Watch your budget in the top bar — build efficiently!"
+    ),
+]
+
 
 # ---------------------------------------------------------------------------
 # Responsive helpers
@@ -95,6 +129,8 @@ class TitleScreen:
         self.surface = surface
         self.started = False
         self._btn_rect: pygame.Rect | None = None
+        self._tutorial_btn_rect: pygame.Rect | None = None
+        self._show_tutorial = False
         self._tick = 0
 
         self._deco_offsets = [
@@ -116,13 +152,24 @@ class TitleScreen:
             return False
 
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            # Close tutorial overlay if open
+            if self._show_tutorial:
+                self._show_tutorial = False
+                return True
             if self._btn_rect and self._btn_rect.collidepoint(event.pos):
                 self.started = True
                 return True
+            if self._tutorial_btn_rect and self._tutorial_btn_rect.collidepoint(event.pos):
+                self._show_tutorial = True
+                return True
 
-        if event.type == pygame.KEYDOWN and event.key in (pygame.K_RETURN, pygame.K_SPACE):
-            self.started = True
-            return True
+        if event.type == pygame.KEYDOWN:
+            if self._show_tutorial and event.key in (pygame.K_ESCAPE, pygame.K_RETURN, pygame.K_SPACE):
+                self._show_tutorial = False
+                return True
+            if not self._show_tutorial and event.key in (pygame.K_RETURN, pygame.K_SPACE):
+                self.started = True
+                return True
 
         return False
 
@@ -143,6 +190,9 @@ class TitleScreen:
         self._draw_title(cx, text_cy)
         self._draw_start_button(cx, text_cy)
         self._draw_hint(cx, sh)
+
+        if self._show_tutorial:
+            self._draw_tutorial_overlay()
 
         return False
 
@@ -195,20 +245,143 @@ class TitleScreen:
         font_btn = _font(26, self.surface, bold=True)
         mouse_pos = pygame.mouse.get_pos()
 
-        bw = _scale(180, self.surface, "w")
+        bw = _scale(160, self.surface, "w")
         bh = _scale(48, self.surface)
         btn_top = cy + _scale(80, self.surface)
-        btn_rect = pygame.Rect(cx - bw // 2, btn_top, bw, bh)
-        self._btn_rect = btn_rect
+        gap = _scale(14, self.surface, "w")
 
-        hovered = btn_rect.collidepoint(mouse_pos)
-        color = C_START_BTN_HOVER if hovered else C_START_BTN
+        # Two buttons centred together
+        total_w = bw * 2 + gap
+        start_rect = pygame.Rect(cx - total_w // 2, btn_top, bw, bh)
+        tut_rect   = pygame.Rect(cx - total_w // 2 + bw + gap, btn_top, bw, bh)
 
-        pygame.draw.rect(self.surface, color, btn_rect, border_radius=8)
-        pygame.draw.rect(self.surface, C_TITLE_ACCENT2, btn_rect, width=1, border_radius=8)
+        self._btn_rect          = start_rect
+        self._tutorial_btn_rect = tut_rect
 
-        label = font_btn.render("START", True, C_START_BTN_TEXT)
-        self.surface.blit(label, label.get_rect(center=btn_rect.center))
+        # START button
+        hovered_s = start_rect.collidepoint(mouse_pos)
+        color_s   = C_START_BTN_HOVER if hovered_s else C_START_BTN
+        pygame.draw.rect(self.surface, color_s, start_rect, border_radius=8)
+        pygame.draw.rect(self.surface, C_TITLE_ACCENT2, start_rect, width=1, border_radius=8)
+        label_s = font_btn.render("START", True, C_START_BTN_TEXT)
+        self.surface.blit(label_s, label_s.get_rect(center=start_rect.center))
+
+        # TUTORIAL button
+        C_TUT_BTN       = (40, 60, 100)
+        C_TUT_BTN_HOVER = (55, 85, 140)
+        hovered_t = tut_rect.collidepoint(mouse_pos)
+        color_t   = C_TUT_BTN_HOVER if hovered_t else C_TUT_BTN
+        pygame.draw.rect(self.surface, color_t, tut_rect, border_radius=8)
+        pygame.draw.rect(self.surface, C_TITLE_ACCENT2, tut_rect, width=1, border_radius=8)
+        label_t = font_btn.render("TUTORIAL", True, C_START_BTN_TEXT)
+        self.surface.blit(label_t, label_t.get_rect(center=tut_rect.center))
+
+    def _draw_tutorial_overlay(self):
+        """Draw a modal overlay with the tutorial text over the title screen."""
+        sw, sh = self.surface.get_size()
+        cx = sw // 2
+
+        # Dark translucent backdrop
+        overlay = pygame.Surface((sw, sh), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 190))
+        self.surface.blit(overlay, (0, 0))
+
+        # Card dimensions
+        card_w = min(_scale(640, self.surface, "w"), int(sw * 0.85))
+        pad    = _scale(28, self.surface)
+
+        # Pre-render all text so we can measure total card height
+        font_heading  = _font(34, self.surface, bold=True)
+        font_section  = _font(22, self.surface, bold=True)
+        font_body     = _font(20, self.surface)
+        font_hint     = _font(16, self.surface)
+
+        line_gap   = _scale(6,  self.surface)
+        sec_gap    = _scale(18, self.surface)
+        inner_w    = card_w - pad * 2
+
+        def wrap(text: str, font: pygame.font.Font, max_w: int) -> list[str]:
+            """Wrap text to fit within max_w pixels."""
+            lines: list[str] = []
+            for paragraph in text.split("\n"):
+                words = paragraph.split()
+                if not words:
+                    lines.append("")
+                    continue
+                current = ""
+                for word in words:
+                    test = (current + " " + word).strip()
+                    if font.size(test)[0] <= max_w:
+                        current = test
+                    else:
+                        if current:
+                            lines.append(current)
+                        current = word
+                if current:
+                    lines.append(current)
+            return lines
+
+        # Build rendered blocks: list of (surface, x_offset)
+        blocks: list[pygame.Surface] = []
+
+        heading_surf = font_heading.render("How to Play", True, C_TITLE_ACCENT)
+        blocks.append(heading_surf)
+
+        for title, body in TUTORIAL_SECTIONS:
+            blocks.append(None)  # spacer sentinel
+            sec_surf = font_section.render(title, True, (200, 215, 235))
+            blocks.append(sec_surf)
+            for line in wrap(body, font_body, inner_w):
+                blocks.append(font_body.render(line if line else " ", True, (160, 175, 195)))
+
+        hint_surf = font_hint.render("Click anywhere or press Esc to close", True, (80, 95, 115))
+
+        total_h = pad
+        for b in blocks:
+            if b is None:
+                total_h += sec_gap
+            else:
+                total_h += b.get_height() + line_gap
+        total_h += sec_gap + hint_surf.get_height() + pad
+
+        card_h = min(total_h, int(sh * 0.82))
+        card_x = cx - card_w // 2
+        card_y = (sh - card_h) // 2
+
+        # Drop shadow
+        shadow = pygame.Surface((card_w + 20, card_h + 20), pygame.SRCALPHA)
+        pygame.draw.rect(shadow, (0, 0, 0, 90),
+                         pygame.Rect(10, 10, card_w, card_h), border_radius=16)
+        self.surface.blit(shadow, (card_x - 10, card_y - 10))
+
+        # Card body
+        card_rect = pygame.Rect(card_x, card_y, card_w, card_h)
+        pygame.draw.rect(self.surface, (18, 24, 38), card_rect, border_radius=16)
+        pygame.draw.rect(self.surface, C_TITLE_ACCENT, card_rect, width=2, border_radius=16)
+
+        # Accent bar
+        accent = pygame.Rect(card_x, card_y, card_w, _scale(5, self.surface))
+        pygame.draw.rect(self.surface, C_TITLE_ACCENT, accent, border_radius=16)
+
+        # Clip content to card
+        clip_rect = pygame.Rect(card_x + pad, card_y + pad,
+                                inner_w, card_h - pad * 2)
+        old_clip = self.surface.get_clip()
+        self.surface.set_clip(clip_rect)
+
+        y = card_y + pad
+        for b in blocks:
+            if b is None:
+                y += sec_gap
+            else:
+                self.surface.blit(b, (card_x + pad, y))
+                y += b.get_height() + line_gap
+
+        self.surface.set_clip(old_clip)
+
+        # Hint pinned to bottom of card
+        self.surface.blit(hint_surf,
+                          hint_surf.get_rect(centerx=cx, y=card_y + card_h - pad // 2 - hint_surf.get_height()))
 
     def _draw_hint(self, cx, sh):
         font_hint = _font(16, self.surface)

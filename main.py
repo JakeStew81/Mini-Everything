@@ -10,15 +10,15 @@ import copy, math
 GAME_TICK = pygame.event.custom_type()
 MONEY_SCALAR = 0.08
 
-NEW_NODE_COOLDOWN_MIN = 300
-NEW_NODE_COOLDOWN_STEP = 25
-NEW_NODE_ODDS_MAX = 0.75
-NEW_NODE_ODDS_STEP = 0.05
+NEW_NODE_COOLDOWN_MIN = 20
+NEW_NODE_COOLDOWN_STEP = 100
+NEW_NODE_ODDS_MAX = 0.90
+NEW_NODE_ODDS_STEP = 0.1
 
-LEVEL_UP_COOLDOWN_MIN = 200
-LEVEL_UP_COOLDOWN_STEP = 25
+LEVEL_UP_COOLDOWN_MIN = 20
+LEVEL_UP_COOLDOWN_STEP = 100
 LEVEL_UP_ODDS_MAX = 0.75
-LEVEL_UP_ODDS_STEP = 0.1
+LEVEL_UP_ODDS_STEP = 0.15
 
 CONNECTION_COSTS = { # $million per mile per level
     "Passenger Rail": 75,
@@ -62,9 +62,9 @@ class Game:
         self.gameOver = False
         self.loseScreen = False
         self.days = 0
-        self.new_node_cooldown = 700
+        self.new_node_cooldown = 500
         self.new_node_odds = 0.1
-        self.level_up_cooldown = 600
+        self.level_up_cooldown = 400
         self.level_up_odds = 0.15
 
     def loop(self):
